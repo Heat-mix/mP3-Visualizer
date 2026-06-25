@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#13121b" />
+    <meta name="description" content="自作MP3を再生して楽しむ、手動再生の音反応ビジュアライザー" />
+    <title>Pulse Deck — MP3 Visualizer</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#top" aria-label="Pulse Deck ホーム">
+          <span class="brand-mark" aria-hidden="true">✦</span>
+          <span>PULSE DECK</span>
+        </a>
+        <span class="manual-badge">MANUAL PLAY</span>
+      </header>
+
+      <section class="deck" id="top" aria-label="音楽ビジュアライザー">
+        <div class="deck-header">
+          <div>
+            <p class="eyebrow">PERSONAL LISTENING DEVICE</p>
+            <h1>あなたの曲を、<br />目でも聴く。</h1>
+          </div>
+          <div class="status-light" id="statusLight" aria-live="polite">
+            <span></span><span id="statusText">READY</span>
+          </div>
+        </div>
+
+        <div class="visual-stage">
+          <canvas id="visualizer" aria-label="音に反応する円形ビジュアライザー"></canvas>
+          <div class="stage-center" aria-hidden="true">
+            <span class="center-label">SIGNAL</span>
+            <strong id="signalValue">00</strong>
+            <span class="center-unit">LEVEL</span>
+          </div>
+        </div>
+
+        <div class="track-readout" aria-live="polite">
+          <span class="track-led"></span>
+          <span id="trackName">音源を選択してください</span>
+          <span id="trackTime">00:00 / 00:00</span>
+        </div>
+
+        <div class="transport">
+          <button class="file-button" id="fileButton" type="button">
+            <span aria-hidden="true">＋</span> MP3を選ぶ
+          </button>
+          <input id="audioFile" type="file" accept="audio/mpeg,audio/wav,audio/ogg,audio/mp4" hidden />
+          <button class="play-button" id="playButton" type="button" disabled aria-label="再生">
+            <span class="play-icon" aria-hidden="true"></span>
+            <span id="playLabel">再生</span>
+          </button>
+          <button class="stop-button" id="stopButton" type="button" disabled>停止</button>
+        </div>
+
+        <div class="progress-wrap">
+          <input id="progress" type="range" min="0" max="100" value="0" step="0.1" disabled aria-label="再生位置" />
+        </div>
+
+        <section class="control-bank" aria-label="ビジュアル設定">
+          <div class="knob-control">
+            <label for="sensitivity">SENSITIVITY</label>
+            <input id="sensitivity" type="range" min="0.5" max="2.4" step="0.1" value="1.2" />
+            <output id="sensitivityValue" for="sensitivity">1.2×</output>
+          </div>
+          <fieldset class="visual-control">
+            <legend>VISUAL</legend>
+            <div class="visual-options">
+              <button class="visual-mode is-active" type="button" data-visual="ring">RING</button>
+              <button class="visual-mode" type="button" data-visual="wave">WAVE</button>
+            </div>
+          </fieldset>
+          <fieldset class="theme-control">
+            <legend>COLOR PATCH</legend>
+            <div class="theme-options">
+              <button class="theme-dot is-active" type="button" data-theme="neon" aria-label="ネオンブルー"></button>
+              <button class="theme-dot amber" type="button" data-theme="amber" aria-label="アンバー"></button>
+              <button class="theme-dot lavender" type="button" data-theme="lavender" aria-label="ラベンダー"></button>
+            </div>
+          </fieldset>
+          <button class="fullscreen-button" id="fullscreenButton" type="button">⌜⌟<span>全画面</span></button>
+        </section>
+      </section>
+
+      <p class="hint">ファイルはこの端末のブラウザ内だけで再生・解析されます。</p>
+    </main>
+    <audio id="audio" preload="metadata"></audio>
+    <script src="app.js"></script>
+  </body>
+</html>
