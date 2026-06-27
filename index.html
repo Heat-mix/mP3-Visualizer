@@ -30,7 +30,7 @@
         </div>
 
         <div class="visual-stage">
-          <canvas id="visualizer" aria-label="音に反応する円形ビジュアライザー"></canvas>
+          <canvas id="visualizer" aria-label="音に反応する音楽ビジュアライザー"></canvas>
           <div class="stage-center" aria-hidden="true">
             <span class="center-label">SIGNAL</span>
             <strong id="signalValue">00</strong>
@@ -69,8 +69,11 @@
           <fieldset class="visual-control">
             <legend>VISUAL</legend>
             <div class="visual-options">
-              <button class="visual-mode is-active" type="button" data-visual="ring">RING</button>
-              <button class="visual-mode" type="button" data-visual="wave">WAVE</button>
+              <button class="visual-mode is-active" type="button" data-visual="ring" aria-pressed="true">RING</button>
+              <button class="visual-mode" type="button" data-visual="wave" aria-pressed="false">WAVE</button>
+              <button class="visual-mode" type="button" data-visual="bar" aria-pressed="false">BAR</button>
+              <button class="visual-mode" type="button" data-visual="orbit" aria-pressed="false">ORBIT</button>
+              <button class="visual-mode" type="button" data-visual="aurora" aria-pressed="false">AURORA</button>
             </div>
           </fieldset>
           <fieldset class="theme-control">
@@ -83,9 +86,21 @@
           </fieldset>
           <button class="fullscreen-button" id="fullscreenButton" type="button">⌜⌟<span>全画面</span></button>
         </section>
+
+        <section class="session-controls" aria-label="再生セッションの操作">
+          <button class="resume-button" id="resumeButton" type="button" hidden>再開する</button>
+          <button class="safe-exit-button" id="safeExitButton" type="button">安全に終了</button>
+          <p class="session-message" id="sessionMessage" role="status" aria-live="polite" hidden></p>
+        </section>
       </section>
 
-      <p class="hint">ファイルはこの端末のブラウザ内だけで再生・解析されます。</p>
+      <footer class="app-footer">
+        <p class="hint">ファイルはこの端末のブラウザ内だけで再生・解析されます。</p>
+        <p class="version-info">
+          <span>Ver <span id="appVersion"></span></span>
+          <span>最終更新：<time id="lastUpdated"></time></span>
+        </p>
+      </footer>
     </main>
     <audio id="audio" preload="metadata"></audio>
     <script src="app.js"></script>
