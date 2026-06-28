@@ -2,10 +2,18 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#13121b" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Visualizer" />
     <meta name="description" content="自作MP3を再生して楽しむ、手動再生の音反応ビジュアライザー" />
     <title>Pulse Deck — MP3 Visualizer</title>
+    <link rel="apple-touch-icon" sizes="180x180" href="assets/icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="assets/icons/icon-512.png" />
+    <link rel="manifest" href="manifest.webmanifest" />
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
@@ -44,28 +52,14 @@
           <span id="trackTime">00:00 / 00:00</span>
         </div>
 
-        <div class="transport">
+        <div class="file-select-row">
           <button class="file-button" id="fileButton" type="button">
             <span aria-hidden="true">＋</span> MP3を選ぶ
           </button>
           <input id="audioFile" type="file" accept="audio/mpeg,audio/wav,audio/ogg,audio/mp4" hidden />
-          <button class="play-button" id="playButton" type="button" disabled aria-label="再生">
-            <span class="play-icon" aria-hidden="true"></span>
-            <span id="playLabel">再生</span>
-          </button>
-          <button class="stop-button" id="stopButton" type="button" disabled>停止</button>
-        </div>
-
-        <div class="progress-wrap">
-          <input id="progress" type="range" min="0" max="100" value="0" step="0.1" disabled aria-label="再生位置" />
         </div>
 
         <section class="control-bank" aria-label="ビジュアル設定">
-          <div class="knob-control">
-            <label for="sensitivity">SENSITIVITY</label>
-            <input id="sensitivity" type="range" min="0.5" max="2.4" step="0.1" value="1.2" />
-            <output id="sensitivityValue" for="sensitivity">1.2×</output>
-          </div>
           <fieldset class="visual-control">
             <legend>VISUAL</legend>
             <div class="visual-options">
@@ -84,8 +78,25 @@
               <button class="theme-dot lavender" type="button" data-theme="lavender" aria-label="ラベンダー"></button>
             </div>
           </fieldset>
+          <div class="knob-control">
+            <label for="sensitivity">SENSITIVITY</label>
+            <input id="sensitivity" type="range" min="0.5" max="2.4" step="0.1" value="1.2" />
+            <output id="sensitivityValue" for="sensitivity">1.2×</output>
+          </div>
           <button class="fullscreen-button" id="fullscreenButton" type="button">⌜⌟<span>全画面</span></button>
         </section>
+
+        <div class="progress-wrap">
+          <input id="progress" type="range" min="0" max="100" value="0" step="0.1" disabled aria-label="再生位置" />
+        </div>
+
+        <div class="transport" aria-label="再生操作">
+          <button class="play-button" id="playButton" type="button" disabled aria-label="再生">
+            <span class="play-icon" aria-hidden="true"></span>
+            <span id="playLabel">再生</span>
+          </button>
+          <button class="stop-button" id="stopButton" type="button" disabled>停止</button>
+        </div>
 
         <section class="session-controls" aria-label="再生セッションの操作">
           <button class="resume-button" id="resumeButton" type="button" hidden>再開する</button>

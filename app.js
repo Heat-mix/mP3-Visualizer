@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
-  version: '0.2.0',
-  lastUpdated: '2026年6月26日',
+  version: '0.3.0',
+  lastUpdated: '2026年6月28日 21:38',
 });
 
 const audio = document.querySelector('#audio');
