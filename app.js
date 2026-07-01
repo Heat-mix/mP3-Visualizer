@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
-  version: '0.3.0',
-  lastUpdated: '2026年6月28日 21:38',
+  version: '0.3.1',
+  lastUpdated: '2026年7月1日 17:27',
 });
 
 const audio = document.querySelector('#audio');
@@ -266,6 +266,31 @@ function drawAurora(width, height, accent, accent2, timestamp) {
   return averageLevel(frequencyData, 64);
 }
 
+function drawPulseDots(width, height, accent, accent2, timestamp) {
+  const dots = 72;
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const baseRadius = Math.min(width, height) * 0.25;
+  const phase = timestamp * 0.0002;
+  ctx.save();
+  ctx.shadowBlur = 13;
+  for (let i = 0; i < dots; i += 1) {
+    const dataIndex = Math.floor((i / dots) * frequencyData.length);
+    const value = frequencyData[dataIndex] / 255;
+    const angle = (i / dots) * Math.PI * 2 - Math.PI / 2 + phase;
+    const radius = baseRadius + value * Math.min(width, height) * 0.2 * sensitivityAmount;
+    const pulse = 1.6 + value * 5.2;
+    ctx.fillStyle = i % 2 ? accent : accent2;
+    ctx.shadowColor = ctx.fillStyle;
+    ctx.globalAlpha = 0.32 + value * 0.68;
+    ctx.beginPath();
+    ctx.arc(centerX + Math.cos(angle) * radius, centerY + Math.sin(angle) * radius, pulse, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+  return averageLevel(frequencyData, dots);
+}
+
 function scheduleFrame() {
   if (isRendering && animationFrameId === null) {
     animationFrameId = requestAnimationFrame(render);
@@ -316,6 +341,7 @@ function render(timestamp = 0) {
     bar: () => drawBar(width, height, accent, accent2),
     orbit: () => drawOrbit(width, height, accent, accent2, timestamp),
     aurora: () => drawAurora(width, height, accent, accent2, timestamp),
+    'pulse-dots': () => drawPulseDots(width, height, accent, accent2, timestamp),
   };
   const level = drawers[visualMode]();
   signalValue.textContent = String(level).padStart(2, '0');
@@ -445,9 +471,10 @@ document.querySelectorAll('.visual-mode').forEach((button) => button.addEventLis
   });
 }));
 document.querySelectorAll('.theme-dot').forEach((button) => button.addEventListener('click', () => {
-  document.body.classList.remove('theme-amber', 'theme-lavender');
+  document.body.classList.remove('theme-amber', 'theme-lavender', 'theme-sakura');
   if (button.dataset.theme === 'amber') document.body.classList.add('theme-amber');
   if (button.dataset.theme === 'lavender') document.body.classList.add('theme-lavender');
+  if (button.dataset.theme === 'sakura') document.body.classList.add('theme-sakura');
   document.querySelectorAll('.theme-dot').forEach((dot) => {
     dot.classList.toggle('is-active', dot === button);
   });
