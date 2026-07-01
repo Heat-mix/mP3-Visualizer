@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
-  version: '0.3.1',
-  lastUpdated: '2026年7月1日 17:27',
+  version: '0.3.2',
+  lastUpdated: '2026年7月1日 17:50',
 });
 
 const audio = document.querySelector('#audio');
@@ -37,6 +37,10 @@ let backgroundResumePending = false;
 let sessionEnded = false;
 let sensitivityAmount = Number(sensitivity.value);
 let visualMode = 'ring';
+let sparkParticles = [];
+let previousSparkLevel = 0;
+let sparkLastTimestamp = 0;
+let sparkLastBurst = 0;
 
 const formatTime = (value) => {
   if (!Number.isFinite(value)) return '00:00';
@@ -266,29 +270,69 @@ function drawAurora(width, height, accent, accent2, timestamp) {
   return averageLevel(frequencyData, 64);
 }
 
-function drawPulseDots(width, height, accent, accent2, timestamp) {
-  const dots = 72;
+function drawSpark(width, height, accent, accent2, timestamp) {
+  const samples = 64;
   const centerX = width / 2;
   const centerY = height / 2;
-  const baseRadius = Math.min(width, height) * 0.25;
-  const phase = timestamp * 0.0002;
-  ctx.save();
-  ctx.shadowBlur = 13;
-  for (let i = 0; i < dots; i += 1) {
-    const dataIndex = Math.floor((i / dots) * frequencyData.length);
-    const value = frequencyData[dataIndex] / 255;
-    const angle = (i / dots) * Math.PI * 2 - Math.PI / 2 + phase;
-    const radius = baseRadius + value * Math.min(width, height) * 0.2 * sensitivityAmount;
-    const pulse = 1.6 + value * 5.2;
-    ctx.fillStyle = i % 2 ? accent : accent2;
-    ctx.shadowColor = ctx.fillStyle;
-    ctx.globalAlpha = 0.32 + value * 0.68;
-    ctx.beginPath();
-    ctx.arc(centerX + Math.cos(angle) * radius, centerY + Math.sin(angle) * radius, pulse, 0, Math.PI * 2);
-    ctx.fill();
+  const minimumSize = Math.min(width, height);
+  const originRadius = minimumSize * 0.22;
+  const level = averageLevel(frequencyData, samples) / 100;
+  const reactiveLevel = Math.min(1, level * sensitivityAmount);
+  const rise = reactiveLevel - previousSparkLevel;
+  const delta = sparkLastTimestamp ? Math.min((timestamp - sparkLastTimestamp) / 1000, 0.05) : 0.016;
+  const canBurst = timestamp - sparkLastBurst > 55;
+
+  if (canBurst && reactiveLevel > 0.22 && (rise > 0.025 || reactiveLevel > 0.68)) {
+    const burstSize = Math.round(3 + reactiveLevel * 8);
+    for (let i = 0; i < burstSize; i += 1) {
+      const angle = Math.random() * Math.PI * 2;
+      const life = 0.28 + Math.random() * 0.34;
+      sparkParticles.push({
+        angle,
+        radius: originRadius * (0.82 + Math.random() * 0.18),
+        speed: minimumSize * (0.24 + Math.random() * 0.34) * (0.75 + reactiveLevel),
+        life,
+        maxLife: life,
+        width: 1.2 + Math.random() * 2.3,
+        length: 3 + Math.random() * 9,
+        alternate: Math.random() > 0.48,
+      });
+    }
+    sparkLastBurst = timestamp;
   }
+
+  previousSparkLevel += (reactiveLevel - previousSparkLevel) * 0.42;
+  sparkLastTimestamp = timestamp;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineCap = 'round';
+  sparkParticles.forEach((particle) => {
+    particle.life -= delta;
+    particle.radius += particle.speed * delta;
+    const alpha = Math.max(0, particle.life / particle.maxLife);
+    const color = particle.alternate ? accent : accent2;
+    const x = centerX + Math.cos(particle.angle) * particle.radius;
+    const y = centerY + Math.sin(particle.angle) * particle.radius;
+    const tailRadius = Math.max(originRadius, particle.radius - particle.length);
+    const tailX = centerX + Math.cos(particle.angle) * tailRadius;
+    const tailY = centerY + Math.sin(particle.angle) * tailRadius;
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 10;
+    ctx.globalAlpha = alpha * alpha * 0.95;
+    ctx.lineWidth = particle.width;
+    ctx.beginPath();
+    ctx.moveTo(tailX, tailY);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x, y, particle.width * 0.65, 0, Math.PI * 2);
+    ctx.fill();
+  });
   ctx.restore();
-  return averageLevel(frequencyData, dots);
+  sparkParticles = sparkParticles.filter((particle) => particle.life > 0 && particle.radius < minimumSize * 0.64);
+  return Math.round(level * 100);
 }
 
 function scheduleFrame() {
@@ -341,7 +385,7 @@ function render(timestamp = 0) {
     bar: () => drawBar(width, height, accent, accent2),
     orbit: () => drawOrbit(width, height, accent, accent2, timestamp),
     aurora: () => drawAurora(width, height, accent, accent2, timestamp),
-    'pulse-dots': () => drawPulseDots(width, height, accent, accent2, timestamp),
+    spark: () => drawSpark(width, height, accent, accent2, timestamp),
   };
   const level = drawers[visualMode]();
   signalValue.textContent = String(level).padStart(2, '0');
@@ -385,6 +429,9 @@ async function safeExit() {
   audio.pause();
   if (Number.isFinite(audio.duration)) audio.currentTime = 0;
   progress.value = 0;
+  sparkParticles = [];
+  previousSparkLevel = 0;
+  sparkLastTimestamp = 0;
   await suspendAudioGraph();
   disconnectAudioGraph();
   stopRendering(true);
@@ -465,6 +512,11 @@ sensitivity.addEventListener('input', () => {
 });
 document.querySelectorAll('.visual-mode').forEach((button) => button.addEventListener('click', () => {
   visualMode = button.dataset.visual;
+  if (visualMode === 'spark') {
+    sparkParticles = [];
+    previousSparkLevel = 0;
+    sparkLastTimestamp = 0;
+  }
   document.querySelectorAll('.visual-mode').forEach((mode) => {
     mode.classList.toggle('is-active', mode === button);
     mode.setAttribute('aria-pressed', String(mode === button));
