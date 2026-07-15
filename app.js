@@ -275,26 +275,26 @@ function drawSpark(width, height, accent, accent2, timestamp) {
   const centerX = width / 2;
   const centerY = height / 2;
   const minimumSize = Math.min(width, height);
-  const originRadius = minimumSize * 0.22;
+  const originRadius = minimumSize * 0.20;
   const level = averageLevel(frequencyData, samples) / 100;
   const reactiveLevel = Math.min(1, level * sensitivityAmount);
   const rise = reactiveLevel - previousSparkLevel;
   const delta = sparkLastTimestamp ? Math.min((timestamp - sparkLastTimestamp) / 1000, 0.05) : 0.016;
-  const canBurst = timestamp - sparkLastBurst > 55;
+  const canBurst = timestamp - sparkLastBurst > 48;
 
-  if (canBurst && reactiveLevel > 0.22 && (rise > 0.025 || reactiveLevel > 0.68)) {
-    const burstSize = Math.round(3 + reactiveLevel * 8);
+  if (canBurst && reactiveLevel > 0.16 && (rise > 0.018 || reactiveLevel > 0.55)) {
+    const burstSize = Math.round(5 + reactiveLevel * 12);
     for (let i = 0; i < burstSize; i += 1) {
       const angle = Math.random() * Math.PI * 2;
-      const life = 0.28 + Math.random() * 0.34;
+      const life = 0.38 + Math.random() * 0.42;
       sparkParticles.push({
         angle,
-        radius: originRadius * (0.82 + Math.random() * 0.18),
-        speed: minimumSize * (0.24 + Math.random() * 0.34) * (0.75 + reactiveLevel),
+        radius: originRadius * (0.78 + Math.random() * 0.22),
+        speed: minimumSize * (0.30 + Math.random() * 0.42) * (0.85 + reactiveLevel),
         life,
         maxLife: life,
-        width: 1.2 + Math.random() * 2.3,
-        length: 3 + Math.random() * 9,
+        width: 1.4 + Math.random() * 2.6,
+        length: 5 + Math.random() * 12,
         alternate: Math.random() > 0.48,
       });
     }
@@ -319,19 +319,19 @@ function drawSpark(width, height, accent, accent2, timestamp) {
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
     ctx.shadowColor = color;
-    ctx.shadowBlur = 10;
-    ctx.globalAlpha = alpha * alpha * 0.95;
+    ctx.shadowBlur = 12;
+    ctx.globalAlpha = alpha * alpha * 0.98;
     ctx.lineWidth = particle.width;
     ctx.beginPath();
     ctx.moveTo(tailX, tailY);
     ctx.lineTo(x, y);
     ctx.stroke();
     ctx.beginPath();
-    ctx.arc(x, y, particle.width * 0.65, 0, Math.PI * 2);
+    ctx.arc(x, y, particle.width * 0.70, 0, Math.PI * 2);
     ctx.fill();
   });
   ctx.restore();
-  sparkParticles = sparkParticles.filter((particle) => particle.life > 0 && particle.radius < minimumSize * 0.64);
+  sparkParticles = sparkParticles.filter((particle) => particle.life > 0 && particle.radius < minimumSize * 0.72);
   return Math.round(level * 100);
 }
 
