@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
   version: '0.3.2',
-  lastUpdated: '2026年8月27日 15:56',
+  lastUpdated: '2026年8月27日 16:53',
 });
 
 const audio = document.querySelector('#audio');
@@ -33,6 +33,7 @@ let objectUrl = null;
 let isConnected = false;
 let animationFrameId = null;
 let isRendering = false;
+let renderTimeline = null;
 let audioSuspendTask = null;
 let backgroundResumePending = false;
 let sessionEnded = false;
@@ -49,6 +50,8 @@ let previousSparkLevel = 0;
 let sparkLastTimestamp = 0;
 let sparkLastBurst = 0;
 
+const TARGET_RENDER_FPS = 45;
+const RENDER_INTERVAL = 1000 / TARGET_RENDER_FPS;
 const SIGNAL_UPDATE_INTERVAL = 100;
 
 const formatTime = (value) => {
@@ -386,11 +389,13 @@ function scheduleFrame() {
 function startRendering() {
   if (isRendering || document.hidden || audio.paused || !analyser) return;
   isRendering = true;
+  renderTimeline = null;
   scheduleFrame();
 }
 
 function stopRendering(clear = false) {
   isRendering = false;
+  renderTimeline = null;
   if (animationFrameId !== null) {
     cancelAnimationFrame(animationFrameId);
     animationFrameId = null;
@@ -412,6 +417,17 @@ function render(timestamp = 0) {
     stopRendering();
     if (!document.hidden && !sessionEnded) drawIdleFrame();
     return;
+  }
+
+  if (renderTimeline !== null) {
+    const elapsed = timestamp - renderTimeline;
+    if (elapsed < RENDER_INTERVAL) {
+      scheduleFrame();
+      return;
+    }
+    renderTimeline = timestamp - (elapsed % RENDER_INTERVAL);
+  } else {
+    renderTimeline = timestamp;
   }
 
   analyser.getByteFrequencyData(frequencyData);
