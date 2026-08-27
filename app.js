@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
   version: '0.3.2',
-  lastUpdated: '2026年8月27日 16:53',
+  lastUpdated: '2026年8月27日 17:41',
 });
 
 const audio = document.querySelector('#audio');
@@ -23,6 +23,8 @@ const sensitivityValue = document.querySelector('#sensitivityValue');
 const signalValue = document.querySelector('#signalValue');
 const canvas = document.querySelector('#visualizer');
 const ctx = canvas.getContext('2d');
+const waveBuffer = document.createElement('canvas');
+const waveBufferContext = waveBuffer.getContext('2d');
 
 let audioContext = null;
 let analyser = null;
@@ -45,6 +47,11 @@ let accentColor = '';
 let accent2Color = '';
 let lastSignalUpdate = -Infinity;
 let displayedSignal = signalValue.textContent;
+let waveGradientCache = [];
+let waveXPositions = null;
+let waveGeometryWidth = 0;
+let waveGeometryBars = 0;
+let waveLineWidth = 0;
 let sparkParticles = [];
 let previousSparkLevel = 0;
 let sparkLastTimestamp = 0;
@@ -53,6 +60,7 @@ let sparkLastBurst = 0;
 const TARGET_RENDER_FPS = 45;
 const RENDER_INTERVAL = 1000 / TARGET_RENDER_FPS;
 const SIGNAL_UPDATE_INTERVAL = 100;
+const WAVE_GRADIENT_STEPS = 256;
 
 const formatTime = (value) => {
   if (!Number.isFinite(value)) return '00:00';
@@ -67,6 +75,10 @@ function resizeCanvas() {
   canvas.width = Math.round(rect.width * ratio);
   canvas.height = Math.round(rect.height * ratio);
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  waveBuffer.width = canvas.width;
+  waveBuffer.height = canvas.height;
+  waveBufferContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+  invalidateWaveCache(true);
   canvasWidth = canvas.clientWidth;
   canvasHeight = canvas.clientHeight;
   if (!isRendering && !document.hidden && !sessionEnded) drawIdleFrame();
@@ -136,6 +148,7 @@ function refreshVisualStyles() {
   const styles = getComputedStyle(document.body);
   accentColor = styles.getPropertyValue('--accent').trim();
   accent2Color = styles.getPropertyValue('--accent-2').trim();
+  invalidateWaveCache();
 }
 
 function updateSignalValue(level, timestamp = 0, force = false) {
@@ -207,30 +220,67 @@ function drawRing(width, height, accent, accent2) {
   return averageLevel(frequencyData, bars);
 }
 
-function drawWave(width, height, accent, accent2) {
-  const bars = analyser.frequencyBinCount;
-  const bandWidth = width / bars;
+function invalidateWaveCache(geometryChanged = false) {
+  waveGradientCache.length = 0;
+  if (geometryChanged) {
+    waveXPositions = null;
+    waveGeometryWidth = 0;
+    waveGeometryBars = 0;
+  }
+}
+
+function prepareWaveCache(width, height, bars, accent, accent2) {
+  if (!waveXPositions || waveGeometryWidth !== width || waveGeometryBars !== bars) {
+    const bandWidth = width / bars;
+    waveXPositions = new Float32Array(bars);
+    for (let i = 0; i < bars; i += 1) {
+      waveXPositions[i] = i * bandWidth + bandWidth / 2;
+    }
+    waveGeometryWidth = width;
+    waveGeometryBars = bars;
+    waveLineWidth = Math.max(2, bandWidth * 0.48);
+  }
+
+  if (waveGradientCache.length === WAVE_GRADIENT_STEPS) return;
   const centerY = height / 2;
-  ctx.save();
-  ctx.shadowColor = accent;
-  ctx.shadowBlur = 13;
-  ctx.lineCap = 'round';
-  for (let i = 0; i < bars; i += 1) {
-    const value = frequencyData[i] / 255;
-    const x = i * bandWidth + bandWidth / 2;
+  for (let dataValue = 0; dataValue < WAVE_GRADIENT_STEPS; dataValue += 1) {
+    const value = dataValue / 255;
     const amplitude = value * height * 0.35 * sensitivityAmount;
-    const gradient = ctx.createLinearGradient(x, centerY - amplitude, x, centerY + amplitude);
+    const gradient = waveBufferContext.createLinearGradient(0, centerY - amplitude, 0, centerY + amplitude);
     gradient.addColorStop(0, accent2);
     gradient.addColorStop(0.5, accent);
     gradient.addColorStop(1, accent2);
-    ctx.strokeStyle = gradient;
-    ctx.globalAlpha = 0.22 + value * 0.7;
-    ctx.lineWidth = Math.max(2, bandWidth * 0.48);
-    ctx.beginPath();
-    ctx.moveTo(x, centerY - amplitude);
-    ctx.lineTo(x, centerY + amplitude);
-    ctx.stroke();
+    waveGradientCache.push(gradient);
   }
+}
+
+function drawWave(width, height, accent, accent2) {
+  const bars = analyser.frequencyBinCount;
+  const centerY = height / 2;
+  prepareWaveCache(width, height, bars, accent, accent2);
+  waveBufferContext.clearRect(0, 0, width, height);
+  waveBufferContext.save();
+  waveBufferContext.shadowBlur = 0;
+  waveBufferContext.lineCap = 'round';
+  waveBufferContext.lineWidth = waveLineWidth;
+  for (let i = 0; i < bars; i += 1) {
+    const dataValue = frequencyData[i];
+    const value = dataValue / 255;
+    const x = waveXPositions[i];
+    const amplitude = value * height * 0.35 * sensitivityAmount;
+    waveBufferContext.strokeStyle = waveGradientCache[dataValue];
+    waveBufferContext.globalAlpha = 0.22 + value * 0.7;
+    waveBufferContext.beginPath();
+    waveBufferContext.moveTo(x, centerY - amplitude);
+    waveBufferContext.lineTo(x, centerY + amplitude);
+    waveBufferContext.stroke();
+  }
+  waveBufferContext.restore();
+
+  ctx.save();
+  ctx.shadowColor = accent;
+  ctx.shadowBlur = 13;
+  ctx.drawImage(waveBuffer, 0, 0, width, height);
   ctx.restore();
   return averageLevel(frequencyData, bars);
 }
@@ -581,6 +631,7 @@ progress.addEventListener('input', () => {
 sensitivity.addEventListener('input', () => {
   sensitivityAmount = Number(sensitivity.value);
   sensitivityValue.textContent = `${sensitivityAmount.toFixed(1)}×`;
+  invalidateWaveCache();
 });
 document.querySelectorAll('.visual-mode').forEach((button) => button.addEventListener('click', () => {
   visualMode = button.dataset.visual;
