@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
   version: '0.3.2',
-  lastUpdated: '2026年7月1日 17:50',
+  lastUpdated: '2026年8月27日 15:56',
 });
 
 const audio = document.querySelector('#audio');
@@ -33,14 +33,23 @@ let objectUrl = null;
 let isConnected = false;
 let animationFrameId = null;
 let isRendering = false;
+let audioSuspendTask = null;
 let backgroundResumePending = false;
 let sessionEnded = false;
 let sensitivityAmount = Number(sensitivity.value);
 let visualMode = 'ring';
+let canvasWidth = 0;
+let canvasHeight = 0;
+let accentColor = '';
+let accent2Color = '';
+let lastSignalUpdate = -Infinity;
+let displayedSignal = signalValue.textContent;
 let sparkParticles = [];
 let previousSparkLevel = 0;
 let sparkLastTimestamp = 0;
 let sparkLastBurst = 0;
+
+const SIGNAL_UPDATE_INTERVAL = 100;
 
 const formatTime = (value) => {
   if (!Number.isFinite(value)) return '00:00';
@@ -55,6 +64,9 @@ function resizeCanvas() {
   canvas.width = Math.round(rect.width * ratio);
   canvas.height = Math.round(rect.height * ratio);
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  canvasWidth = canvas.clientWidth;
+  canvasHeight = canvas.clientHeight;
+  if (!isRendering && !document.hidden && !sessionEnded) drawIdleFrame();
 }
 
 function showMessage(message) {
@@ -94,10 +106,19 @@ function disconnectAudioGraph() {
   isConnected = false;
 }
 
-async function suspendAudioGraph() {
-  if (audioContext && audioContext.state === 'running') {
-    try { await audioContext.suspend(); } catch (error) { console.debug(error); }
-  }
+function suspendAudioGraph() {
+  if (audioSuspendTask) return audioSuspendTask;
+  if (!audioContext || audioContext.state !== 'running') return Promise.resolve();
+
+  audioSuspendTask = audioContext.suspend()
+    .catch((error) => { console.debug(error); })
+    .finally(() => { audioSuspendTask = null; });
+  return audioSuspendTask;
+}
+
+async function resumeAudioGraph() {
+  if (audioSuspendTask) await audioSuspendTask;
+  if (audioContext && audioContext.state === 'suspended') await audioContext.resume();
 }
 
 function setPlayingUI(playing) {
@@ -108,24 +129,45 @@ function setPlayingUI(playing) {
   statusText.textContent = playing ? 'PLAYING' : 'READY';
 }
 
+function refreshVisualStyles() {
+  const styles = getComputedStyle(document.body);
+  accentColor = styles.getPropertyValue('--accent').trim();
+  accent2Color = styles.getPropertyValue('--accent-2').trim();
+}
+
+function updateSignalValue(level, timestamp = 0, force = false) {
+  if (!force && timestamp - lastSignalUpdate < SIGNAL_UPDATE_INTERVAL) return;
+  const nextValue = String(level).padStart(2, '0');
+  if (nextValue !== displayedSignal) {
+    signalValue.textContent = nextValue;
+    displayedSignal = nextValue;
+  }
+  lastSignalUpdate = timestamp;
+}
+
 function clearCanvas() {
-  ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
-  signalValue.textContent = '00';
+  ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+  updateSignalValue(0, 0, true);
 }
 
 function drawIdleRing(width, height) {
   const x = width / 2;
   const y = height / 2;
   const radius = Math.min(width, height) * 0.27;
-  const accent = getComputedStyle(document.body).getPropertyValue('--accent').trim();
   ctx.clearRect(0, 0, width, height);
-  ctx.strokeStyle = accent;
+  ctx.strokeStyle = accentColor;
   ctx.globalAlpha = 0.35;
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.arc(x, y, radius, 0, Math.PI * 2);
   ctx.stroke();
   ctx.globalAlpha = 1;
+}
+
+function drawIdleFrame() {
+  if (!canvasWidth || !canvasHeight) return;
+  drawIdleRing(canvasWidth, canvasHeight);
+  updateSignalValue(0, 0, true);
 }
 
 function averageLevel(values, count) {
@@ -275,26 +317,26 @@ function drawSpark(width, height, accent, accent2, timestamp) {
   const centerX = width / 2;
   const centerY = height / 2;
   const minimumSize = Math.min(width, height);
-  const originRadius = minimumSize * 0.20;
+  const originRadius = minimumSize * 0.22;
   const level = averageLevel(frequencyData, samples) / 100;
   const reactiveLevel = Math.min(1, level * sensitivityAmount);
   const rise = reactiveLevel - previousSparkLevel;
   const delta = sparkLastTimestamp ? Math.min((timestamp - sparkLastTimestamp) / 1000, 0.05) : 0.016;
-  const canBurst = timestamp - sparkLastBurst > 48;
+  const canBurst = timestamp - sparkLastBurst > 55;
 
-  if (canBurst && reactiveLevel > 0.16 && (rise > 0.018 || reactiveLevel > 0.55)) {
-    const burstSize = Math.round(5 + reactiveLevel * 12);
+  if (canBurst && reactiveLevel > 0.22 && (rise > 0.025 || reactiveLevel > 0.68)) {
+    const burstSize = Math.round(3 + reactiveLevel * 8);
     for (let i = 0; i < burstSize; i += 1) {
       const angle = Math.random() * Math.PI * 2;
-      const life = 0.38 + Math.random() * 0.42;
+      const life = 0.28 + Math.random() * 0.34;
       sparkParticles.push({
         angle,
-        radius: originRadius * (0.78 + Math.random() * 0.22),
-        speed: minimumSize * (0.30 + Math.random() * 0.42) * (0.85 + reactiveLevel),
+        radius: originRadius * (0.82 + Math.random() * 0.18),
+        speed: minimumSize * (0.24 + Math.random() * 0.34) * (0.75 + reactiveLevel),
         life,
         maxLife: life,
-        width: 1.4 + Math.random() * 2.6,
-        length: 5 + Math.random() * 12,
+        width: 1.2 + Math.random() * 2.3,
+        length: 3 + Math.random() * 9,
         alternate: Math.random() > 0.48,
       });
     }
@@ -319,19 +361,19 @@ function drawSpark(width, height, accent, accent2, timestamp) {
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
     ctx.shadowColor = color;
-    ctx.shadowBlur = 12;
-    ctx.globalAlpha = alpha * alpha * 0.98;
+    ctx.shadowBlur = 10;
+    ctx.globalAlpha = alpha * alpha * 0.95;
     ctx.lineWidth = particle.width;
     ctx.beginPath();
     ctx.moveTo(tailX, tailY);
     ctx.lineTo(x, y);
     ctx.stroke();
     ctx.beginPath();
-    ctx.arc(x, y, particle.width * 0.70, 0, Math.PI * 2);
+    ctx.arc(x, y, particle.width * 0.65, 0, Math.PI * 2);
     ctx.fill();
   });
   ctx.restore();
-  sparkParticles = sparkParticles.filter((particle) => particle.life > 0 && particle.radius < minimumSize * 0.72);
+  sparkParticles = sparkParticles.filter((particle) => particle.life > 0 && particle.radius < minimumSize * 0.64);
   return Math.round(level * 100);
 }
 
@@ -342,7 +384,7 @@ function scheduleFrame() {
 }
 
 function startRendering() {
-  if (isRendering || document.hidden) return;
+  if (isRendering || document.hidden || audio.paused || !analyser) return;
   isRendering = true;
   scheduleFrame();
 }
@@ -359,37 +401,38 @@ function stopRendering(clear = false) {
 function render(timestamp = 0) {
   animationFrameId = null;
   if (!isRendering) return;
-  const width = canvas.clientWidth;
-  const height = canvas.clientHeight;
+  const width = canvasWidth;
+  const height = canvasHeight;
   if (!width || !height) {
     scheduleFrame();
     return;
   }
 
   if (!analyser || audio.paused) {
-    drawIdleRing(width, height);
-    signalValue.textContent = '00';
-    scheduleFrame();
+    stopRendering();
+    if (!document.hidden && !sessionEnded) drawIdleFrame();
     return;
   }
 
   analyser.getByteFrequencyData(frequencyData);
   if (visualMode === 'aurora') analyser.getByteTimeDomainData(timeData);
   ctx.clearRect(0, 0, width, height);
-  const styles = getComputedStyle(document.body);
-  const accent = styles.getPropertyValue('--accent').trim();
-  const accent2 = styles.getPropertyValue('--accent-2').trim();
-  const drawers = {
-    ring: () => drawRing(width, height, accent, accent2),
-    wave: () => drawWave(width, height, accent, accent2),
-    bar: () => drawBar(width, height, accent, accent2),
-    orbit: () => drawOrbit(width, height, accent, accent2, timestamp),
-    aurora: () => drawAurora(width, height, accent, accent2, timestamp),
-    spark: () => drawSpark(width, height, accent, accent2, timestamp),
-  };
-  const level = drawers[visualMode]();
-  signalValue.textContent = String(level).padStart(2, '0');
+  let level = 0;
+  if (visualMode === 'ring') level = drawRing(width, height, accentColor, accent2Color);
+  else if (visualMode === 'wave') level = drawWave(width, height, accentColor, accent2Color);
+  else if (visualMode === 'bar') level = drawBar(width, height, accentColor, accent2Color);
+  else if (visualMode === 'orbit') level = drawOrbit(width, height, accentColor, accent2Color, timestamp);
+  else if (visualMode === 'aurora') level = drawAurora(width, height, accentColor, accent2Color, timestamp);
+  else if (visualMode === 'spark') level = drawSpark(width, height, accentColor, accent2Color, timestamp);
+  updateSignalValue(level, timestamp);
   scheduleFrame();
+}
+
+async function enterPausedState(drawIdle = !document.hidden) {
+  stopRendering();
+  if (drawIdle && !sessionEnded) drawIdleFrame();
+  else updateSignalValue(0, 0, true);
+  await suspendAudioGraph();
 }
 
 function showResumePrompt() {
@@ -403,15 +446,14 @@ async function pauseForBackground() {
   if (sessionEnded) return;
   if (!audio.paused && !audio.ended) backgroundResumePending = true;
   audio.pause();
-  stopRendering();
-  await suspendAudioGraph();
+  await enterPausedState(false);
 }
 
 async function resumeAfterBackground() {
   if (!backgroundResumePending || !audio.src || sessionEnded) return;
   try {
     createAudioGraph();
-    if (audioContext.state === 'suspended') await audioContext.resume();
+    await resumeAudioGraph();
     await audio.play();
     backgroundResumePending = false;
     resumeButton.hidden = true;
@@ -463,18 +505,24 @@ fileInput.addEventListener('change', () => {
   resumeButton.hidden = true;
   hideMessage();
   statusText.textContent = 'LOADED';
-  startRendering();
+  void enterPausedState();
 });
 
 playButton.addEventListener('click', async () => {
   if (!audio.src || sessionEnded) return;
   try {
-    createAudioGraph();
-    if (audioContext.state === 'suspended') await audioContext.resume();
-    if (audio.paused) await audio.play(); else audio.pause();
-    startRendering();
+    if (audio.paused) {
+      createAudioGraph();
+      await resumeAudioGraph();
+      await audio.play();
+      startRendering();
+    } else {
+      audio.pause();
+      await enterPausedState();
+    }
   } catch (error) {
     console.error(error);
+    await enterPausedState();
     showMessage('再生を開始できませんでした。音源を選び直してお試しください。');
   }
 });
@@ -485,12 +533,19 @@ stopButton.addEventListener('click', () => {
   hideMessage();
   audio.pause();
   audio.currentTime = 0;
+  void enterPausedState();
 });
 resumeButton.addEventListener('click', resumeAfterBackground);
 safeExitButton.addEventListener('click', safeExit);
 
-audio.addEventListener('play', () => setPlayingUI(true));
-audio.addEventListener('pause', () => setPlayingUI(false));
+audio.addEventListener('play', () => {
+  setPlayingUI(true);
+  startRendering();
+});
+audio.addEventListener('pause', () => {
+  setPlayingUI(false);
+  if (!sessionEnded) void enterPausedState();
+});
 audio.addEventListener('loadedmetadata', () => {
   trackTime.textContent = `00:00 / ${formatTime(audio.duration)}`;
 });
@@ -501,6 +556,7 @@ audio.addEventListener('timeupdate', () => {
 audio.addEventListener('ended', () => {
   audio.currentTime = 0;
   progress.value = 0;
+  void enterPausedState();
 });
 
 progress.addEventListener('input', () => {
@@ -527,6 +583,8 @@ document.querySelectorAll('.theme-dot').forEach((button) => button.addEventListe
   if (button.dataset.theme === 'amber') document.body.classList.add('theme-amber');
   if (button.dataset.theme === 'lavender') document.body.classList.add('theme-lavender');
   if (button.dataset.theme === 'sakura') document.body.classList.add('theme-sakura');
+  refreshVisualStyles();
+  if (!isRendering && !document.hidden && !sessionEnded) drawIdleFrame();
   document.querySelectorAll('.theme-dot').forEach((dot) => {
     dot.classList.toggle('is-active', dot === button);
   });
@@ -546,14 +604,14 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     void pauseForBackground();
   } else if (!sessionEnded) {
-    startRendering();
+    if (audio.paused) drawIdleFrame(); else startRendering();
     showResumePrompt();
   }
 });
 window.addEventListener('pagehide', () => { void pauseForBackground(); });
 window.addEventListener('pageshow', () => {
   if (!sessionEnded && !document.hidden) {
-    startRendering();
+    if (audio.paused) drawIdleFrame(); else startRendering();
     showResumePrompt();
   }
 });
@@ -568,5 +626,5 @@ window.addEventListener('resize', resizeCanvas);
 
 document.querySelector('#appVersion').textContent = APP_META.version;
 document.querySelector('#lastUpdated').textContent = APP_META.lastUpdated;
+refreshVisualStyles();
 resizeCanvas();
-startRendering();
