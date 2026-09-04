@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
   version: '0.3.2',
-  lastUpdated: '2026年8月27日 17:41',
+  lastUpdated: '2026年9月4日 21:31',
 });
 
 const audio = document.querySelector('#audio');
@@ -52,6 +52,14 @@ let waveXPositions = null;
 let waveGeometryWidth = 0;
 let waveGeometryBars = 0;
 let waveLineWidth = 0;
+let auroraGradient = null;
+let auroraXPositions = null;
+let auroraDataIndices = null;
+let auroraWaveValues = null;
+let auroraBaseSines = null;
+let auroraBaseCosines = null;
+let auroraGeometryWidth = 0;
+let auroraTimeDataLength = 0;
 let sparkParticles = [];
 let previousSparkLevel = 0;
 let sparkLastTimestamp = 0;
@@ -61,6 +69,8 @@ const TARGET_RENDER_FPS = 45;
 const RENDER_INTERVAL = 1000 / TARGET_RENDER_FPS;
 const SIGNAL_UPDATE_INTERVAL = 100;
 const WAVE_GRADIENT_STEPS = 256;
+const AURORA_LAYERS = 4;
+const AURORA_SAMPLES = 72;
 
 const formatTime = (value) => {
   if (!Number.isFinite(value)) return '00:00';
@@ -79,6 +89,7 @@ function resizeCanvas() {
   waveBuffer.height = canvas.height;
   waveBufferContext.setTransform(ratio, 0, 0, ratio, 0, 0);
   invalidateWaveCache(true);
+  invalidateAuroraCache(true);
   canvasWidth = canvas.clientWidth;
   canvasHeight = canvas.clientHeight;
   if (!isRendering && !document.hidden && !sessionEnded) drawIdleFrame();
@@ -149,6 +160,7 @@ function refreshVisualStyles() {
   accentColor = styles.getPropertyValue('--accent').trim();
   accent2Color = styles.getPropertyValue('--accent-2').trim();
   invalidateWaveCache();
+  invalidateAuroraCache();
 }
 
 function updateSignalValue(level, timestamp = 0, force = false) {
@@ -332,32 +344,81 @@ function drawOrbit(width, height, accent, accent2, timestamp) {
   return averageLevel(frequencyData, particles);
 }
 
+function invalidateAuroraCache(geometryChanged = false) {
+  auroraGradient = null;
+  if (geometryChanged) {
+    auroraXPositions = null;
+    auroraGeometryWidth = 0;
+  }
+}
+
+function prepareAuroraCache(width, accent, accent2) {
+  if (!auroraGradient) {
+    auroraGradient = ctx.createLinearGradient(0, 0, width, 0);
+    auroraGradient.addColorStop(0, accent2);
+    auroraGradient.addColorStop(0.5, accent);
+    auroraGradient.addColorStop(1, accent2);
+  }
+
+  if (!auroraXPositions || auroraGeometryWidth !== width) {
+    auroraXPositions = new Float64Array(AURORA_SAMPLES);
+    for (let i = 0; i < AURORA_SAMPLES; i += 1) {
+      auroraXPositions[i] = (i / (AURORA_SAMPLES - 1)) * width;
+    }
+    auroraGeometryWidth = width;
+  }
+
+  if (!auroraDataIndices || auroraTimeDataLength !== timeData.length) {
+    auroraDataIndices = new Uint16Array(AURORA_SAMPLES);
+    auroraWaveValues = new Float64Array(AURORA_SAMPLES);
+    for (let i = 0; i < AURORA_SAMPLES; i += 1) {
+      auroraDataIndices[i] = Math.floor((i / AURORA_SAMPLES) * timeData.length);
+    }
+    auroraTimeDataLength = timeData.length;
+  }
+
+  if (!auroraBaseSines || !auroraBaseCosines) {
+    const tableSize = AURORA_LAYERS * AURORA_SAMPLES;
+    auroraBaseSines = new Float64Array(tableSize);
+    auroraBaseCosines = new Float64Array(tableSize);
+    for (let layer = 0; layer < AURORA_LAYERS; layer += 1) {
+      for (let i = 0; i < AURORA_SAMPLES; i += 1) {
+        const tableIndex = layer * AURORA_SAMPLES + i;
+        const baseAngle = i * 0.16 + layer * 1.3;
+        auroraBaseSines[tableIndex] = Math.sin(baseAngle);
+        auroraBaseCosines[tableIndex] = Math.cos(baseAngle);
+      }
+    }
+  }
+}
+
 function drawAurora(width, height, accent, accent2, timestamp) {
-  const layers = 4;
-  const samples = 72;
+  prepareAuroraCache(width, accent, accent2);
   const phase = timestamp * 0.001;
+  const phaseSin = Math.sin(phase);
+  const phaseCos = Math.cos(phase);
+  const waveScale = height * 0.24 * sensitivityAmount;
+  const driftScale = height * 0.045;
+  for (let i = 0; i < AURORA_SAMPLES; i += 1) {
+    auroraWaveValues[i] = (timeData[auroraDataIndices[i]] - 128) / 128;
+  }
+
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   ctx.lineCap = 'round';
-  for (let layer = 0; layer < layers; layer += 1) {
+  ctx.strokeStyle = auroraGradient;
+  for (let layer = 0; layer < AURORA_LAYERS; layer += 1) {
     const centerY = height * (0.36 + layer * 0.09);
-    const gradient = ctx.createLinearGradient(0, 0, width, 0);
-    gradient.addColorStop(0, accent2);
-    gradient.addColorStop(0.5, accent);
-    gradient.addColorStop(1, accent2);
-    ctx.strokeStyle = gradient;
     ctx.shadowColor = layer % 2 ? accent2 : accent;
     ctx.shadowBlur = 18;
     ctx.globalAlpha = 0.18 + layer * 0.07;
     ctx.lineWidth = 4 + layer * 2;
     ctx.beginPath();
-    for (let i = 0; i < samples; i += 1) {
-      const x = (i / (samples - 1)) * width;
-      const dataIndex = Math.floor((i / samples) * timeData.length);
-      const wave = (timeData[dataIndex] - 128) / 128;
-      const drift = Math.sin(i * 0.16 + phase + layer * 1.3) * height * 0.045;
-      const y = centerY + wave * height * 0.24 * sensitivityAmount + drift;
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    for (let i = 0; i < AURORA_SAMPLES; i += 1) {
+      const tableIndex = layer * AURORA_SAMPLES + i;
+      const drift = (auroraBaseSines[tableIndex] * phaseCos + auroraBaseCosines[tableIndex] * phaseSin) * driftScale;
+      const y = centerY + auroraWaveValues[i] * waveScale + drift;
+      if (i === 0) ctx.moveTo(auroraXPositions[i], y); else ctx.lineTo(auroraXPositions[i], y);
     }
     ctx.stroke();
   }
