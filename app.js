@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
   version: '0.3.2',
-  lastUpdated: '2026年9月9日 16:00',
+  lastUpdated: '2026年9月9日 16:36',
 });
 
 const audio = document.querySelector('#audio');
@@ -56,6 +56,17 @@ let waveXPositions = null;
 let waveGeometryWidth = 0;
 let waveGeometryBars = 0;
 let waveLineWidth = 0;
+let orbitBaseSines = null;
+let orbitBaseCosines = null;
+let orbitSpeedGroups = null;
+let orbitDataIndices = null;
+let orbitFrequencyDataLength = 0;
+let orbitGeometryWidth = 0;
+let orbitGeometryHeight = 0;
+let orbitCenterX = 0;
+let orbitCenterY = 0;
+let orbitMinimumSize = 0;
+let orbitBaseRadius = 0;
 let auroraGradient = null;
 let auroraXPositions = null;
 let auroraDataIndices = null;
@@ -73,6 +84,10 @@ const TARGET_RENDER_FPS = 45;
 const RENDER_INTERVAL = 1000 / TARGET_RENDER_FPS;
 const SIGNAL_UPDATE_INTERVAL = 100;
 const WAVE_GRADIENT_STEPS = 256;
+const ORBIT_PARTICLES = 52;
+const ORBIT_SPEED_MULTIPLIERS = new Float64Array([1, 1 + 0.18, 1 + 2 * 0.18]);
+const ORBIT_PHASE_SINES = new Float64Array(ORBIT_SPEED_MULTIPLIERS.length);
+const ORBIT_PHASE_COSINES = new Float64Array(ORBIT_SPEED_MULTIPLIERS.length);
 const AURORA_LAYERS = 4;
 const AURORA_SAMPLES = 72;
 
@@ -328,30 +343,68 @@ function drawBar(width, height, accent, accent2) {
   return averageLevel(frequencyData, bars);
 }
 
+function prepareOrbitCache(width, height) {
+  if (!orbitBaseSines || !orbitBaseCosines || !orbitSpeedGroups) {
+    orbitBaseSines = new Float64Array(ORBIT_PARTICLES);
+    orbitBaseCosines = new Float64Array(ORBIT_PARTICLES);
+    orbitSpeedGroups = new Uint8Array(ORBIT_PARTICLES);
+    for (let i = 0; i < ORBIT_PARTICLES; i += 1) {
+      const baseAngle = (i / ORBIT_PARTICLES) * Math.PI * 2;
+      orbitBaseSines[i] = Math.sin(baseAngle);
+      orbitBaseCosines[i] = Math.cos(baseAngle);
+      orbitSpeedGroups[i] = i % ORBIT_SPEED_MULTIPLIERS.length;
+    }
+  }
+
+  if (!orbitDataIndices || orbitFrequencyDataLength !== frequencyData.length) {
+    orbitDataIndices = new Uint16Array(ORBIT_PARTICLES);
+    for (let i = 0; i < ORBIT_PARTICLES; i += 1) {
+      orbitDataIndices[i] = Math.floor((i / ORBIT_PARTICLES) * frequencyData.length);
+    }
+    orbitFrequencyDataLength = frequencyData.length;
+  }
+
+  if (orbitGeometryWidth !== width || orbitGeometryHeight !== height) {
+    orbitCenterX = width / 2;
+    orbitCenterY = height / 2;
+    orbitMinimumSize = Math.min(width, height);
+    orbitBaseRadius = orbitMinimumSize * 0.25;
+    orbitGeometryWidth = width;
+    orbitGeometryHeight = height;
+  }
+}
+
 function drawOrbit(width, height, accent, accent2, timestamp) {
-  const particles = 52;
-  const centerX = width / 2;
-  const centerY = height / 2;
-  const baseRadius = Math.min(width, height) * 0.25;
+  prepareOrbitCache(width, height);
   const phase = timestamp * 0.00035;
+  for (let group = 0; group < ORBIT_SPEED_MULTIPLIERS.length; group += 1) {
+    const groupPhase = phase * ORBIT_SPEED_MULTIPLIERS[group];
+    ORBIT_PHASE_SINES[group] = Math.sin(groupPhase);
+    ORBIT_PHASE_COSINES[group] = Math.cos(groupPhase);
+  }
+
   ctx.save();
   ctx.shadowBlur = 12;
-  for (let i = 0; i < particles; i += 1) {
-    const dataIndex = Math.floor((i / particles) * frequencyData.length);
-    const value = frequencyData[dataIndex] / 255;
-    const angle = (i / particles) * Math.PI * 2 + phase * (1 + (i % 3) * 0.18);
-    const radius = baseRadius + value * Math.min(width, height) * 0.2 * sensitivityAmount;
-    const x = centerX + Math.cos(angle) * radius;
-    const y = centerY + Math.sin(angle) * radius;
-    ctx.fillStyle = i % 2 ? accent : accent2;
-    ctx.shadowColor = ctx.fillStyle;
+  for (let i = 0; i < ORBIT_PARTICLES; i += 1) {
+    const value = frequencyData[orbitDataIndices[i]] / 255;
+    const speedGroup = orbitSpeedGroups[i];
+    const directionX = orbitBaseCosines[i] * ORBIT_PHASE_COSINES[speedGroup]
+      - orbitBaseSines[i] * ORBIT_PHASE_SINES[speedGroup];
+    const directionY = orbitBaseSines[i] * ORBIT_PHASE_COSINES[speedGroup]
+      + orbitBaseCosines[i] * ORBIT_PHASE_SINES[speedGroup];
+    const radius = orbitBaseRadius + value * orbitMinimumSize * 0.2 * sensitivityAmount;
+    const x = orbitCenterX + directionX * radius;
+    const y = orbitCenterY + directionY * radius;
+    const color = i % 2 ? accent : accent2;
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
     ctx.globalAlpha = 0.35 + value * 0.65;
     ctx.beginPath();
     ctx.arc(x, y, 1.8 + value * 5.5, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
-  return averageLevel(frequencyData, particles);
+  return averageLevel(frequencyData, ORBIT_PARTICLES);
 }
 
 function invalidateAuroraCache(geometryChanged = false) {
