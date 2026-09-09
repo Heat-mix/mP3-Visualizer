@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
   version: '0.3.2',
-  lastUpdated: '2026年9月4日 21:31',
+  lastUpdated: '2026年9月9日 15:23',
 });
 
 const audio = document.querySelector('#audio');
@@ -445,6 +445,8 @@ function drawSpark(width, height, accent, accent2, timestamp) {
       const life = 0.28 + Math.random() * 0.34;
       sparkParticles.push({
         angle,
+        directionX: Math.cos(angle),
+        directionY: Math.sin(angle),
         radius: originRadius * (0.82 + Math.random() * 0.18),
         speed: minimumSize * (0.24 + Math.random() * 0.34) * (0.75 + reactiveLevel),
         life,
@@ -462,20 +464,23 @@ function drawSpark(width, height, accent, accent2, timestamp) {
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   ctx.lineCap = 'round';
-  sparkParticles.forEach((particle) => {
+  ctx.shadowBlur = 10;
+  const maximumRadius = minimumSize * 0.64;
+  let writeIndex = 0;
+  for (let readIndex = 0; readIndex < sparkParticles.length; readIndex += 1) {
+    const particle = sparkParticles[readIndex];
     particle.life -= delta;
     particle.radius += particle.speed * delta;
     const alpha = Math.max(0, particle.life / particle.maxLife);
     const color = particle.alternate ? accent : accent2;
-    const x = centerX + Math.cos(particle.angle) * particle.radius;
-    const y = centerY + Math.sin(particle.angle) * particle.radius;
+    const x = centerX + particle.directionX * particle.radius;
+    const y = centerY + particle.directionY * particle.radius;
     const tailRadius = Math.max(originRadius, particle.radius - particle.length);
-    const tailX = centerX + Math.cos(particle.angle) * tailRadius;
-    const tailY = centerY + Math.sin(particle.angle) * tailRadius;
+    const tailX = centerX + particle.directionX * tailRadius;
+    const tailY = centerY + particle.directionY * tailRadius;
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
     ctx.shadowColor = color;
-    ctx.shadowBlur = 10;
     ctx.globalAlpha = alpha * alpha * 0.95;
     ctx.lineWidth = particle.width;
     ctx.beginPath();
@@ -485,9 +490,13 @@ function drawSpark(width, height, accent, accent2, timestamp) {
     ctx.beginPath();
     ctx.arc(x, y, particle.width * 0.65, 0, Math.PI * 2);
     ctx.fill();
-  });
+    if (particle.life > 0 && particle.radius < maximumRadius) {
+      sparkParticles[writeIndex] = particle;
+      writeIndex += 1;
+    }
+  }
   ctx.restore();
-  sparkParticles = sparkParticles.filter((particle) => particle.life > 0 && particle.radius < minimumSize * 0.64);
+  sparkParticles.length = writeIndex;
   return Math.round(level * 100);
 }
 
