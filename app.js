@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
   version: '0.3.2',
-  lastUpdated: '2026年9月9日 15:23',
+  lastUpdated: '2026年9月9日 16:00',
 });
 
 const audio = document.querySelector('#audio');
@@ -25,6 +25,10 @@ const canvas = document.querySelector('#visualizer');
 const ctx = canvas.getContext('2d');
 const waveBuffer = document.createElement('canvas');
 const waveBufferContext = waveBuffer.getContext('2d');
+const sparkAccentBuffer = document.createElement('canvas');
+const sparkAccentBufferContext = sparkAccentBuffer.getContext('2d');
+const sparkAccent2Buffer = document.createElement('canvas');
+const sparkAccent2BufferContext = sparkAccent2Buffer.getContext('2d');
 
 let audioContext = null;
 let analyser = null;
@@ -88,6 +92,12 @@ function resizeCanvas() {
   waveBuffer.width = canvas.width;
   waveBuffer.height = canvas.height;
   waveBufferContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+  sparkAccentBuffer.width = canvas.width;
+  sparkAccentBuffer.height = canvas.height;
+  sparkAccentBufferContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+  sparkAccent2Buffer.width = canvas.width;
+  sparkAccent2Buffer.height = canvas.height;
+  sparkAccent2BufferContext.setTransform(ratio, 0, 0, ratio, 0, 0);
   invalidateWaveCache(true);
   invalidateAuroraCache(true);
   canvasWidth = canvas.clientWidth;
@@ -461,42 +471,67 @@ function drawSpark(width, height, accent, accent2, timestamp) {
 
   previousSparkLevel += (reactiveLevel - previousSparkLevel) * 0.42;
   sparkLastTimestamp = timestamp;
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  ctx.lineCap = 'round';
-  ctx.shadowBlur = 10;
+  sparkAccentBufferContext.clearRect(0, 0, width, height);
+  sparkAccent2BufferContext.clearRect(0, 0, width, height);
+  sparkAccentBufferContext.save();
+  sparkAccent2BufferContext.save();
+  sparkAccentBufferContext.globalCompositeOperation = 'lighter';
+  sparkAccent2BufferContext.globalCompositeOperation = 'lighter';
+  sparkAccentBufferContext.lineCap = 'round';
+  sparkAccent2BufferContext.lineCap = 'round';
+  sparkAccentBufferContext.shadowBlur = 0;
+  sparkAccent2BufferContext.shadowBlur = 0;
+  sparkAccentBufferContext.strokeStyle = accent;
+  sparkAccentBufferContext.fillStyle = accent;
+  sparkAccent2BufferContext.strokeStyle = accent2;
+  sparkAccent2BufferContext.fillStyle = accent2;
   const maximumRadius = minimumSize * 0.64;
+  let hasAccentParticles = false;
+  let hasAccent2Particles = false;
   let writeIndex = 0;
   for (let readIndex = 0; readIndex < sparkParticles.length; readIndex += 1) {
     const particle = sparkParticles[readIndex];
     particle.life -= delta;
     particle.radius += particle.speed * delta;
     const alpha = Math.max(0, particle.life / particle.maxLife);
-    const color = particle.alternate ? accent : accent2;
+    const particleContext = particle.alternate ? sparkAccentBufferContext : sparkAccent2BufferContext;
+    if (particle.alternate) hasAccentParticles = true; else hasAccent2Particles = true;
     const x = centerX + particle.directionX * particle.radius;
     const y = centerY + particle.directionY * particle.radius;
     const tailRadius = Math.max(originRadius, particle.radius - particle.length);
     const tailX = centerX + particle.directionX * tailRadius;
     const tailY = centerY + particle.directionY * tailRadius;
-    ctx.strokeStyle = color;
-    ctx.fillStyle = color;
-    ctx.shadowColor = color;
-    ctx.globalAlpha = alpha * alpha * 0.95;
-    ctx.lineWidth = particle.width;
-    ctx.beginPath();
-    ctx.moveTo(tailX, tailY);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(x, y, particle.width * 0.65, 0, Math.PI * 2);
-    ctx.fill();
+    particleContext.globalAlpha = alpha * alpha * 0.95;
+    particleContext.lineWidth = particle.width;
+    particleContext.beginPath();
+    particleContext.moveTo(tailX, tailY);
+    particleContext.lineTo(x, y);
+    particleContext.stroke();
+    particleContext.beginPath();
+    particleContext.arc(x, y, particle.width * 0.65, 0, Math.PI * 2);
+    particleContext.fill();
     if (particle.life > 0 && particle.radius < maximumRadius) {
       sparkParticles[writeIndex] = particle;
       writeIndex += 1;
     }
   }
-  ctx.restore();
+  sparkAccentBufferContext.restore();
+  sparkAccent2BufferContext.restore();
   sparkParticles.length = writeIndex;
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur = 10;
+  if (hasAccentParticles) {
+    ctx.shadowColor = accent;
+    ctx.drawImage(sparkAccentBuffer, 0, 0, width, height);
+  }
+  if (hasAccent2Particles) {
+    ctx.shadowColor = accent2;
+    ctx.drawImage(sparkAccent2Buffer, 0, 0, width, height);
+  }
+  ctx.restore();
   return Math.round(level * 100);
 }
 
