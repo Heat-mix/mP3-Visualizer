@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
   version: '0.3.2',
-  lastUpdated: '2026年9月9日 16:36',
+  lastUpdated: '2026年9月11日 12:32',
 });
 
 const audio = document.querySelector('#audio');
@@ -51,6 +51,17 @@ let accentColor = '';
 let accent2Color = '';
 let lastSignalUpdate = -Infinity;
 let displayedSignal = signalValue.textContent;
+let ringGradientCache = [];
+let ringAngles = null;
+let ringGeometryWidth = 0;
+let ringGeometryHeight = 0;
+let ringCenterX = 0;
+let ringCenterY = 0;
+let ringMinimumSize = 0;
+let ringBaseRadius = 0;
+let ringGradientAccent = '';
+let ringGradientAccent2 = '';
+let ringGradientSensitivity = 0;
 let waveGradientCache = [];
 let waveXPositions = null;
 let waveGeometryWidth = 0;
@@ -83,6 +94,8 @@ let sparkLastBurst = 0;
 const TARGET_RENDER_FPS = 45;
 const RENDER_INTERVAL = 1000 / TARGET_RENDER_FPS;
 const SIGNAL_UPDATE_INTERVAL = 100;
+const RING_BARS = 72;
+const RING_GRADIENT_STEPS = 256;
 const WAVE_GRADIENT_STEPS = 256;
 const ORBIT_PARTICLES = 52;
 const ORBIT_SPEED_MULTIPLIERS = new Float64Array([1, 1 + 0.18, 1 + 2 * 0.18]);
@@ -113,6 +126,7 @@ function resizeCanvas() {
   sparkAccent2Buffer.width = canvas.width;
   sparkAccent2Buffer.height = canvas.height;
   sparkAccent2BufferContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+  invalidateRingCache(true);
   invalidateWaveCache(true);
   invalidateAuroraCache(true);
   canvasWidth = canvas.clientWidth;
@@ -184,6 +198,7 @@ function refreshVisualStyles() {
   const styles = getComputedStyle(document.body);
   accentColor = styles.getPropertyValue('--accent').trim();
   accent2Color = styles.getPropertyValue('--accent-2').trim();
+  invalidateRingCache();
   invalidateWaveCache();
   invalidateAuroraCache();
 }
@@ -229,32 +244,86 @@ function averageLevel(values, count) {
   return Math.round((total / count) * 100);
 }
 
-function drawRing(width, height, accent, accent2) {
-  const centerX = width / 2;
-  const centerY = height / 2;
-  const base = Math.min(width, height) * 0.28;
-  const bars = 72;
-  for (let i = 0; i < bars; i += 1) {
-    const value = frequencyData[i] / 255;
-    const angle = (Math.PI * 2 * i) / bars - Math.PI / 2;
-    const length = 7 + value * Math.min(width, height) * 0.2 * sensitivityAmount;
-    ctx.save();
-    ctx.translate(centerX, centerY);
-    ctx.rotate(angle);
-    const gradient = ctx.createLinearGradient(base, 0, base + length, 0);
+function invalidateRingCache(geometryChanged = false) {
+  ringGradientCache.length = 0;
+  ringGradientAccent = '';
+  ringGradientAccent2 = '';
+  ringGradientSensitivity = 0;
+  if (geometryChanged) {
+    ringGeometryWidth = 0;
+    ringGeometryHeight = 0;
+  }
+}
+
+function prepareRingCache(width, height, accent, accent2) {
+  if (!ringAngles) {
+    ringAngles = new Float64Array(RING_BARS);
+    for (let i = 0; i < RING_BARS; i += 1) {
+      ringAngles[i] = (Math.PI * 2 * i) / RING_BARS - Math.PI / 2;
+    }
+  }
+
+  if (ringGeometryWidth !== width || ringGeometryHeight !== height) {
+    ringCenterX = width / 2;
+    ringCenterY = height / 2;
+    ringMinimumSize = Math.min(width, height);
+    ringBaseRadius = ringMinimumSize * 0.28;
+    ringGeometryWidth = width;
+    ringGeometryHeight = height;
+    ringGradientCache.length = 0;
+  }
+
+  const gradientChanged = ringGradientCache.length !== RING_GRADIENT_STEPS
+    || ringGradientAccent !== accent
+    || ringGradientAccent2 !== accent2
+    || ringGradientSensitivity !== sensitivityAmount;
+  if (!gradientChanged) return;
+
+  ringGradientCache.length = 0;
+  for (let dataValue = 0; dataValue < RING_GRADIENT_STEPS; dataValue += 1) {
+    const value = dataValue / 255;
+    const length = 7 + value * ringMinimumSize * 0.2 * sensitivityAmount;
+    const gradient = ctx.createRadialGradient(
+      ringCenterX,
+      ringCenterY,
+      ringBaseRadius,
+      ringCenterX,
+      ringCenterY,
+      ringBaseRadius + length,
+    );
     gradient.addColorStop(0, accent);
     gradient.addColorStop(1, accent2);
-    ctx.strokeStyle = gradient;
+    ringGradientCache.push(gradient);
+  }
+  ringGradientAccent = accent;
+  ringGradientAccent2 = accent2;
+  ringGradientSensitivity = sensitivityAmount;
+}
+
+function drawRing(width, height, accent, accent2) {
+  prepareRingCache(width, height, accent, accent2);
+  let total = 0;
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (let i = 0; i < RING_BARS; i += 1) {
+    const dataValue = frequencyData[i];
+    const value = dataValue / 255;
+    const length = 7 + value * ringMinimumSize * 0.2 * sensitivityAmount;
+    total += value;
+    ctx.save();
+    ctx.translate(ringCenterX, ringCenterY);
+    ctx.rotate(ringAngles[i]);
+    ctx.strokeStyle = ringGradientCache[dataValue];
     ctx.globalAlpha = 0.28 + value * 0.72;
     ctx.lineWidth = 2.3 + value * 2.4;
-    ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(base, 0);
-    ctx.lineTo(base + length, 0);
+    ctx.moveTo(ringBaseRadius, 0);
+    ctx.lineTo(ringBaseRadius + length, 0);
     ctx.stroke();
     ctx.restore();
   }
-  return averageLevel(frequencyData, bars);
+  ctx.restore();
+  return Math.round((total / RING_BARS) * 100);
 }
 
 function invalidateWaveCache(geometryChanged = false) {
@@ -789,6 +858,7 @@ progress.addEventListener('input', () => {
 sensitivity.addEventListener('input', () => {
   sensitivityAmount = Number(sensitivity.value);
   sensitivityValue.textContent = `${sensitivityAmount.toFixed(1)}×`;
+  invalidateRingCache();
   invalidateWaveCache();
 });
 document.querySelectorAll('.visual-mode').forEach((button) => button.addEventListener('click', () => {
