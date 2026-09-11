@@ -1,12 +1,13 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
-  version: '0.3.2',
-  lastUpdated: '2026年9月11日 13:09',
+  version: '0.4.0',
+  lastUpdated: '2026年9月11日 15:22',
 });
 
 const audio = document.querySelector('#audio');
 const fileInput = document.querySelector('#audioFile');
 const fileButton = document.querySelector('#fileButton');
+const addTrackButton = document.querySelector('#addTrackButton');
 const playButton = document.querySelector('#playButton');
 const stopButton = document.querySelector('#stopButton');
 const resumeButton = document.querySelector('#resumeButton');
@@ -15,7 +16,12 @@ const sessionMessage = document.querySelector('#sessionMessage');
 const playLabel = document.querySelector('#playLabel');
 const progress = document.querySelector('#progress');
 const trackName = document.querySelector('#trackName');
+const trackPosition = document.querySelector('#trackPosition');
 const trackTime = document.querySelector('#trackTime');
+const playlistPanel = document.querySelector('#playlistPanel');
+const playlistList = document.querySelector('#playlistList');
+const playlistCount = document.querySelector('#playlistCount');
+const repeatOne = document.querySelector('#repeatOne');
 const statusLight = document.querySelector('#statusLight');
 const statusText = document.querySelector('#statusText');
 const sensitivity = document.querySelector('#sensitivity');
@@ -35,7 +41,10 @@ let analyser = null;
 let source = null;
 let frequencyData = null;
 let timeData = null;
-let objectUrl = null;
+let playlist = [];
+let currentTrackIndex = -1;
+let playbackActionId = 0;
+let isTrackTransitioning = false;
 let isConnected = false;
 let animationFrameId = null;
 let isRendering = false;
@@ -109,6 +118,7 @@ let sparkLastBurst = 0;
 const TARGET_RENDER_FPS = 45;
 const RENDER_INTERVAL = 1000 / TARGET_RENDER_FPS;
 const SIGNAL_UPDATE_INTERVAL = 100;
+const MAX_PLAYLIST_TRACKS = 3;
 const RING_BARS = 72;
 const RING_GRADIENT_STEPS = 256;
 const WAVE_GRADIENT_STEPS = 256;
@@ -162,6 +172,83 @@ function hideMessage() {
   sessionMessage.textContent = '';
 }
 
+function revokePlaylistUrls() {
+  for (let i = 0; i < playlist.length; i += 1) {
+    URL.revokeObjectURL(playlist[i].url);
+  }
+  playlist = [];
+  currentTrackIndex = -1;
+}
+
+function renderPlaylist() {
+  playlistList.replaceChildren();
+  playlistPanel.hidden = playlist.length === 0;
+  playlistCount.textContent = `${playlist.length} / ${MAX_PLAYLIST_TRACKS}`;
+
+  for (let index = 0; index < playlist.length; index += 1) {
+    const track = playlist[index];
+    const isCurrent = index === currentTrackIndex;
+    const item = document.createElement('li');
+    item.className = 'playlist-item';
+    item.classList.toggle('is-current', isCurrent);
+    item.classList.toggle('is-playing', isCurrent && !audio.paused && !audio.ended);
+    if (isCurrent) item.setAttribute('aria-current', 'true');
+
+    const number = document.createElement('span');
+    number.className = 'playlist-index';
+    number.textContent = `${isCurrent && !audio.paused && !audio.ended ? '▶ ' : ''}${index + 1}.`;
+
+    const name = document.createElement('span');
+    name.className = 'playlist-name';
+    name.textContent = track.file.name;
+
+    const removeButton = document.createElement('button');
+    removeButton.className = 'playlist-remove';
+    removeButton.type = 'button';
+    removeButton.dataset.index = String(index);
+    removeButton.disabled = sessionEnded;
+    removeButton.setAttribute('aria-label', `${track.file.name}を削除`);
+    removeButton.title = '削除';
+    removeButton.textContent = '×';
+
+    item.append(number, name, removeButton);
+    playlistList.append(item);
+  }
+
+  fileButton.disabled = playlist.length > 0 && !sessionEnded;
+  addTrackButton.disabled = playlist.length === 0
+    || playlist.length >= MAX_PLAYLIST_TRACKS
+    || sessionEnded;
+  addTrackButton.title = playlist.length >= MAX_PLAYLIST_TRACKS ? '追加できる曲は3曲までです' : '';
+}
+
+function updateTrackReadout(resetTime = false) {
+  const track = playlist[currentTrackIndex];
+  if (!track) {
+    trackName.textContent = '音源を選択してください';
+    trackPosition.textContent = '0 / 0';
+    trackTime.textContent = '00:00 / 00:00';
+    renderPlaylist();
+    return;
+  }
+
+  trackName.textContent = track.file.name;
+  trackPosition.textContent = `${currentTrackIndex + 1} / ${playlist.length}`;
+  if (resetTime) trackTime.textContent = '00:00 / 00:00';
+  renderPlaylist();
+}
+
+function loadPlaylistTrack(index) {
+  const track = playlist[index];
+  if (!track) return false;
+  currentTrackIndex = index;
+  audio.src = track.url;
+  audio.load();
+  progress.value = 0;
+  updateTrackReadout(true);
+  return true;
+}
+
 function createAudioGraph() {
   if (!audioContext) {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -202,6 +289,16 @@ function suspendAudioGraph() {
 async function resumeAudioGraph() {
   if (audioSuspendTask) await audioSuspendTask;
   if (audioContext && audioContext.state === 'suspended') await audioContext.resume();
+}
+
+async function playLoadedTrack(actionId) {
+  createAudioGraph();
+  await resumeAudioGraph();
+  if (actionId !== playbackActionId || sessionEnded || document.hidden) return false;
+  await audio.play();
+  if (actionId !== playbackActionId || sessionEnded || document.hidden) return false;
+  startRendering();
+  return true;
 }
 
 function setPlayingUI(playing) {
@@ -825,6 +922,8 @@ function showResumePrompt() {
 
 async function pauseForBackground() {
   if (sessionEnded) return;
+  playbackActionId += 1;
+  isTrackTransitioning = false;
   if (!audio.paused && !audio.ended) backgroundResumePending = true;
   audio.pause();
   await enterPausedState(false);
@@ -832,21 +931,23 @@ async function pauseForBackground() {
 
 async function resumeAfterBackground() {
   if (!backgroundResumePending || !audio.src || sessionEnded) return;
+  const actionId = ++playbackActionId;
   try {
-    createAudioGraph();
-    await resumeAudioGraph();
-    await audio.play();
+    const started = await playLoadedTrack(actionId);
+    if (!started) return;
     backgroundResumePending = false;
     resumeButton.hidden = true;
     hideMessage();
-    startRendering();
   } catch (error) {
+    if (actionId !== playbackActionId) return;
     console.error(error);
     showMessage('再開できませんでした。もう一度「再開する」を押してください。');
   }
 }
 
 async function safeExit() {
+  playbackActionId += 1;
+  isTrackTransitioning = false;
   sessionEnded = true;
   backgroundResumePending = false;
   audio.pause();
@@ -865,20 +966,38 @@ async function safeExit() {
   stopButton.disabled = true;
   progress.disabled = true;
   safeExitButton.disabled = true;
+  renderPlaylist();
   showMessage('再生を終了しました。この画面は閉じても大丈夫です。');
 }
 
-fileButton.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', () => {
-  const [file] = fileInput.files;
+function addPlaylistTrack(file) {
   if (!file) return;
+  if (sessionEnded) {
+    revokePlaylistUrls();
+    sessionEnded = false;
+  }
+  if (playlist.length >= MAX_PLAYLIST_TRACKS) {
+    showMessage('追加できる曲は3曲までです。');
+    return;
+  }
+
+  const isFirstTrack = playlist.length === 0;
+  playlist.push({
+    file,
+    url: URL.createObjectURL(file),
+  });
+
+  if (!isFirstTrack) {
+    updateTrackReadout();
+    return;
+  }
+
+  playbackActionId += 1;
+  isTrackTransitioning = false;
   audio.pause();
-  if (objectUrl) URL.revokeObjectURL(objectUrl);
-  objectUrl = URL.createObjectURL(file);
-  audio.src = objectUrl;
-  trackName.textContent = file.name;
   sessionEnded = false;
   backgroundResumePending = false;
+  loadPlaylistTrack(0);
   playButton.disabled = false;
   stopButton.disabled = false;
   progress.disabled = false;
@@ -887,21 +1006,103 @@ fileInput.addEventListener('change', () => {
   hideMessage();
   statusText.textContent = 'LOADED';
   void enterPausedState();
+}
+
+async function removePlaylistTrack(index) {
+  if (sessionEnded || index < 0 || index >= playlist.length) return;
+
+  const removingCurrentTrack = index === currentTrackIndex;
+  if (!removingCurrentTrack) {
+    const [removedTrack] = playlist.splice(index, 1);
+    URL.revokeObjectURL(removedTrack.url);
+    if (index < currentTrackIndex) currentTrackIndex -= 1;
+    updateTrackReadout();
+    return;
+  }
+
+  const actionId = ++playbackActionId;
+  const wasPlaying = !audio.paused && !audio.ended;
+  isTrackTransitioning = true;
+  backgroundResumePending = false;
+  resumeButton.hidden = true;
+  audio.pause();
+  stopRendering();
+
+  const [removedTrack] = playlist.splice(index, 1);
+  URL.revokeObjectURL(removedTrack.url);
+
+  try {
+    if (playlist.length === 0) {
+      currentTrackIndex = -1;
+      audio.removeAttribute('src');
+      audio.load();
+      progress.value = 0;
+      playButton.disabled = true;
+      stopButton.disabled = true;
+      progress.disabled = true;
+      setPlayingUI(false);
+      statusText.textContent = 'READY';
+      hideMessage();
+      updateTrackReadout();
+      await enterPausedState();
+      return;
+    }
+
+    const replacementIndex = Math.min(index, playlist.length - 1);
+    loadPlaylistTrack(replacementIndex);
+    statusText.textContent = 'LOADED';
+    hideMessage();
+
+    if (wasPlaying && !document.hidden) {
+      const started = await playLoadedTrack(actionId);
+      if (!started && actionId === playbackActionId) await enterPausedState();
+    } else {
+      await enterPausedState();
+    }
+  } catch (error) {
+    if (actionId !== playbackActionId) return;
+    console.error(error);
+    await enterPausedState();
+    showMessage('曲を切り替えられませんでした。「再生」を押して再開してください。');
+  } finally {
+    if (actionId === playbackActionId) isTrackTransitioning = false;
+  }
+}
+
+fileButton.addEventListener('click', () => {
+  if (playlist.length > 0 && !sessionEnded) return;
+  fileInput.value = '';
+  fileInput.click();
+});
+addTrackButton.addEventListener('click', () => {
+  if (playlist.length === 0 || playlist.length >= MAX_PLAYLIST_TRACKS || sessionEnded) return;
+  fileInput.value = '';
+  fileInput.click();
+});
+fileInput.addEventListener('change', () => {
+  const [file] = fileInput.files;
+  addPlaylistTrack(file);
+  fileInput.value = '';
+});
+playlistList.addEventListener('click', (event) => {
+  const removeButton = event.target.closest('.playlist-remove');
+  if (!removeButton) return;
+  void removePlaylistTrack(Number(removeButton.dataset.index));
 });
 
 playButton.addEventListener('click', async () => {
   if (!audio.src || sessionEnded) return;
+  const actionId = ++playbackActionId;
+  isTrackTransitioning = false;
   try {
     if (audio.paused) {
-      createAudioGraph();
-      await resumeAudioGraph();
-      await audio.play();
-      startRendering();
+      await playLoadedTrack(actionId);
     } else {
       audio.pause();
       await enterPausedState();
     }
   } catch (error) {
+    if (actionId !== playbackActionId) return;
     console.error(error);
     await enterPausedState();
     showMessage('再生を開始できませんでした。音源を選び直してお試しください。');
@@ -909,6 +1110,8 @@ playButton.addEventListener('click', async () => {
 });
 
 stopButton.addEventListener('click', () => {
+  playbackActionId += 1;
+  isTrackTransitioning = false;
   backgroundResumePending = false;
   resumeButton.hidden = true;
   hideMessage();
@@ -921,11 +1124,13 @@ safeExitButton.addEventListener('click', safeExit);
 
 audio.addEventListener('play', () => {
   setPlayingUI(true);
+  renderPlaylist();
   startRendering();
 });
 audio.addEventListener('pause', () => {
   setPlayingUI(false);
-  if (!sessionEnded) void enterPausedState();
+  renderPlaylist();
+  if (!sessionEnded && !isTrackTransitioning && !audio.ended) void enterPausedState();
 });
 audio.addEventListener('loadedmetadata', () => {
   trackTime.textContent = `00:00 / ${formatTime(audio.duration)}`;
@@ -934,10 +1139,40 @@ audio.addEventListener('timeupdate', () => {
   progress.value = audio.duration ? (audio.currentTime / audio.duration) * 100 : 0;
   trackTime.textContent = `${formatTime(audio.currentTime)} / ${formatTime(audio.duration)}`;
 });
-audio.addEventListener('ended', () => {
+audio.addEventListener('ended', async () => {
+  const actionId = ++playbackActionId;
+  isTrackTransitioning = true;
+  stopRendering();
+  setPlayingUI(false);
   audio.currentTime = 0;
   progress.value = 0;
-  void enterPausedState();
+  try {
+    if (document.hidden || sessionEnded) {
+      await enterPausedState(false);
+      return;
+    }
+
+    if (repeatOne.checked) {
+      await playLoadedTrack(actionId);
+      return;
+    }
+
+    if (currentTrackIndex + 1 < playlist.length) {
+      loadPlaylistTrack(currentTrackIndex + 1);
+      statusText.textContent = 'LOADED';
+      await playLoadedTrack(actionId);
+      return;
+    }
+
+    await enterPausedState();
+  } catch (error) {
+    if (actionId !== playbackActionId) return;
+    console.error(error);
+    await enterPausedState();
+    showMessage('自動再生を続けられませんでした。「再生」を押して再開してください。');
+  } finally {
+    if (actionId === playbackActionId) isTrackTransitioning = false;
+  }
 });
 
 progress.addEventListener('input', () => {
@@ -1000,15 +1235,17 @@ window.addEventListener('pageshow', () => {
   }
 });
 window.addEventListener('beforeunload', () => {
+  playbackActionId += 1;
   audio.pause();
   stopRendering();
   disconnectAudioGraph();
   if (audioContext && audioContext.state === 'running') void audioContext.suspend();
-  if (objectUrl) URL.revokeObjectURL(objectUrl);
+  revokePlaylistUrls();
 });
 window.addEventListener('resize', resizeCanvas);
 
 document.querySelector('#appVersion').textContent = APP_META.version;
 document.querySelector('#lastUpdated').textContent = APP_META.lastUpdated;
+renderPlaylist();
 refreshVisualStyles();
 resizeCanvas();

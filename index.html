@@ -48,16 +48,30 @@
 
         <div class="track-readout" aria-live="polite">
           <span class="track-led"></span>
-          <span id="trackName">音源を選択してください</span>
-          <span id="trackTime">00:00 / 00:00</span>
+          <span class="track-name" id="trackName">音源を選択してください</span>
+          <span class="track-meta">
+            <span class="track-position" id="trackPosition">0 / 0</span>
+            <span id="trackTime">00:00 / 00:00</span>
+          </span>
         </div>
 
         <div class="file-select-row">
           <button class="file-button" id="fileButton" type="button">
             <span aria-hidden="true">＋</span> MP3を選ぶ
           </button>
+          <button class="file-button add-track-button" id="addTrackButton" type="button" disabled>
+            <span aria-hidden="true">＋</span> 曲を追加
+          </button>
           <input id="audioFile" type="file" accept="audio/mpeg,audio/wav,audio/ogg,audio/mp4" hidden />
         </div>
+
+        <section class="playlist-panel" id="playlistPanel" aria-labelledby="playlistHeading" hidden>
+          <div class="playlist-header">
+            <h2 id="playlistHeading">PLAYLIST</h2>
+            <span id="playlistCount">0 / 3</span>
+          </div>
+          <ol class="playlist-list" id="playlistList"></ol>
+        </section>
 
         <section class="control-bank" aria-label="ビジュアル設定">
           <fieldset class="visual-control">
@@ -98,6 +112,11 @@
             <span id="playLabel">再生</span>
           </button>
           <button class="stop-button" id="stopButton" type="button" disabled>停止</button>
+          <label class="repeat-control" for="repeatOne">
+            <input id="repeatOne" type="checkbox" />
+            <span class="repeat-switch" aria-hidden="true"></span>
+            <span>1曲リピート</span>
+          </label>
         </div>
 
         <section class="session-controls" aria-label="再生セッションの操作">
