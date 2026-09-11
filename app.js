@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
   version: '0.3.2',
-  lastUpdated: '2026年9月11日 12:32',
+  lastUpdated: '2026年9月11日 13:09',
 });
 
 const audio = document.querySelector('#audio');
@@ -67,6 +67,21 @@ let waveXPositions = null;
 let waveGeometryWidth = 0;
 let waveGeometryBars = 0;
 let waveLineWidth = 0;
+let barGradientCache = [];
+let barHeightValues = null;
+let barAlphaValues = null;
+let barDataIndices = null;
+let barXPositions = null;
+let barFrequencyDataLength = 0;
+let barGeometryWidth = 0;
+let barGeometryHeight = 0;
+let barHeightTableHeight = 0;
+let barHeightTableSensitivity = 0;
+let barGap = 0;
+let barWidth = 0;
+let barBaseline = 0;
+let barGradientAccent = '';
+let barGradientAccent2 = '';
 let orbitBaseSines = null;
 let orbitBaseCosines = null;
 let orbitSpeedGroups = null;
@@ -97,6 +112,8 @@ const SIGNAL_UPDATE_INTERVAL = 100;
 const RING_BARS = 72;
 const RING_GRADIENT_STEPS = 256;
 const WAVE_GRADIENT_STEPS = 256;
+const BAR_BARS = 48;
+const BAR_GRADIENT_STEPS = 256;
 const ORBIT_PARTICLES = 52;
 const ORBIT_SPEED_MULTIPLIERS = new Float64Array([1, 1 + 0.18, 1 + 2 * 0.18]);
 const ORBIT_PHASE_SINES = new Float64Array(ORBIT_SPEED_MULTIPLIERS.length);
@@ -128,6 +145,7 @@ function resizeCanvas() {
   sparkAccent2BufferContext.setTransform(ratio, 0, 0, ratio, 0, 0);
   invalidateRingCache(true);
   invalidateWaveCache(true);
+  invalidateBarCache(true);
   invalidateAuroraCache(true);
   canvasWidth = canvas.clientWidth;
   canvasHeight = canvas.clientHeight;
@@ -200,6 +218,7 @@ function refreshVisualStyles() {
   accent2Color = styles.getPropertyValue('--accent-2').trim();
   invalidateRingCache();
   invalidateWaveCache();
+  invalidateBarGradientCache();
   invalidateAuroraCache();
 }
 
@@ -391,25 +410,94 @@ function drawWave(width, height, accent, accent2) {
   return averageLevel(frequencyData, bars);
 }
 
-function drawBar(width, height, accent, accent2) {
-  const bars = 48;
-  const gap = Math.max(2, width * 0.004);
-  const barWidth = (width - gap * (bars - 1)) / bars;
-  const baseline = height * 0.84;
-  for (let i = 0; i < bars; i += 1) {
-    const dataIndex = Math.floor((i / bars) * frequencyData.length);
-    const value = frequencyData[dataIndex] / 255;
-    const barHeight = Math.max(3, value * height * 0.68 * sensitivityAmount);
-    const x = i * (barWidth + gap);
-    const gradient = ctx.createLinearGradient(0, baseline, 0, baseline - barHeight);
+function invalidateBarGradientCache() {
+  barGradientCache.length = 0;
+  barGradientAccent = '';
+  barGradientAccent2 = '';
+}
+
+function invalidateBarCache(geometryChanged = false) {
+  invalidateBarGradientCache();
+  barHeightValues = null;
+  barHeightTableHeight = 0;
+  barHeightTableSensitivity = 0;
+  if (geometryChanged) {
+    barXPositions = null;
+    barGeometryWidth = 0;
+    barGeometryHeight = 0;
+  }
+}
+
+function prepareBarCache(width, height, accent, accent2) {
+  if (!barDataIndices || barFrequencyDataLength !== frequencyData.length) {
+    barDataIndices = new Uint16Array(BAR_BARS);
+    for (let i = 0; i < BAR_BARS; i += 1) {
+      barDataIndices[i] = Math.floor((i / BAR_BARS) * frequencyData.length);
+    }
+    barFrequencyDataLength = frequencyData.length;
+  }
+
+  if (!barXPositions || barGeometryWidth !== width || barGeometryHeight !== height) {
+    barGap = Math.max(2, width * 0.004);
+    barWidth = (width - barGap * (BAR_BARS - 1)) / BAR_BARS;
+    barBaseline = height * 0.84;
+    barXPositions = new Float64Array(BAR_BARS);
+    for (let i = 0; i < BAR_BARS; i += 1) {
+      barXPositions[i] = i * (barWidth + barGap);
+    }
+    barGeometryWidth = width;
+    barGeometryHeight = height;
+    invalidateBarGradientCache();
+  }
+
+  if (!barAlphaValues) {
+    barAlphaValues = new Float64Array(BAR_GRADIENT_STEPS);
+    for (let dataValue = 0; dataValue < BAR_GRADIENT_STEPS; dataValue += 1) {
+      barAlphaValues[dataValue] = 0.32 + (dataValue / 255) * 0.68;
+    }
+  }
+
+  const heightTableChanged = !barHeightValues
+    || barHeightTableHeight !== height
+    || barHeightTableSensitivity !== sensitivityAmount;
+  if (heightTableChanged) {
+    barHeightValues = new Float64Array(BAR_GRADIENT_STEPS);
+    for (let dataValue = 0; dataValue < BAR_GRADIENT_STEPS; dataValue += 1) {
+      barHeightValues[dataValue] = Math.max(3, (dataValue / 255) * height * 0.68 * sensitivityAmount);
+    }
+    barHeightTableHeight = height;
+    barHeightTableSensitivity = sensitivityAmount;
+    invalidateBarGradientCache();
+  }
+
+  const gradientChanged = barGradientCache.length !== BAR_GRADIENT_STEPS
+    || barGradientAccent !== accent
+    || barGradientAccent2 !== accent2;
+  if (!gradientChanged) return;
+
+  barGradientCache.length = 0;
+  for (let dataValue = 0; dataValue < BAR_GRADIENT_STEPS; dataValue += 1) {
+    const barHeight = barHeightValues[dataValue];
+    const gradient = ctx.createLinearGradient(0, barBaseline, 0, barBaseline - barHeight);
     gradient.addColorStop(0, accent2);
     gradient.addColorStop(1, accent);
-    ctx.fillStyle = gradient;
-    ctx.globalAlpha = 0.32 + value * 0.68;
-    ctx.fillRect(x, baseline - barHeight, barWidth, barHeight);
+    barGradientCache.push(gradient);
+  }
+  barGradientAccent = accent;
+  barGradientAccent2 = accent2;
+}
+
+function drawBar(width, height, accent, accent2) {
+  prepareBarCache(width, height, accent, accent2);
+  for (let i = 0; i < BAR_BARS; i += 1) {
+    const dataValue = frequencyData[barDataIndices[i]];
+    const barHeight = barHeightValues[dataValue];
+    ctx.fillStyle = barGradientCache[dataValue];
+    ctx.globalAlpha = barAlphaValues[dataValue];
+    ctx.fillRect(barXPositions[i], barBaseline - barHeight, barWidth, barHeight);
   }
   ctx.globalAlpha = 1;
-  return averageLevel(frequencyData, bars);
+  return averageLevel(frequencyData, BAR_BARS);
 }
 
 function prepareOrbitCache(width, height) {
@@ -860,6 +948,7 @@ sensitivity.addEventListener('input', () => {
   sensitivityValue.textContent = `${sensitivityAmount.toFixed(1)}×`;
   invalidateRingCache();
   invalidateWaveCache();
+  invalidateBarCache();
 });
 document.querySelectorAll('.visual-mode').forEach((button) => button.addEventListener('click', () => {
   visualMode = button.dataset.visual;
