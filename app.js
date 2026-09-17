@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
   version: '0.4.0',
-  lastUpdated: '2026年9月11日 15:22',
+  lastUpdated: '2026年9月17日 16:42',
 });
 
 const audio = document.querySelector('#audio');
@@ -21,7 +21,8 @@ const trackTime = document.querySelector('#trackTime');
 const playlistPanel = document.querySelector('#playlistPanel');
 const playlistList = document.querySelector('#playlistList');
 const playlistCount = document.querySelector('#playlistCount');
-const repeatOne = document.querySelector('#repeatOne');
+const repeatButton = document.querySelector('#repeatButton');
+const repeatState = document.querySelector('#repeatState');
 const statusLight = document.querySelector('#statusLight');
 const statusText = document.querySelector('#statusText');
 const sensitivity = document.querySelector('#sensitivity');
@@ -43,6 +44,8 @@ let frequencyData = null;
 let timeData = null;
 let playlist = [];
 let currentTrackIndex = -1;
+let repeatMode = 'off';
+let stoppedByUser = false;
 let playbackActionId = 0;
 let isTrackTransitioning = false;
 let isConnected = false;
@@ -119,6 +122,9 @@ const TARGET_RENDER_FPS = 45;
 const RENDER_INTERVAL = 1000 / TARGET_RENDER_FPS;
 const SIGNAL_UPDATE_INTERVAL = 100;
 const MAX_PLAYLIST_TRACKS = 3;
+const REPEAT_MODES = ['off', 'one', 'all'];
+const REPEAT_LABELS = { off: 'OFF', one: '1', all: 'ALL' };
+const REPEAT_DESCRIPTIONS = { off: 'リピートなし', one: '1曲リピート', all: '全曲リピート' };
 const RING_BARS = 72;
 const RING_GRADIENT_STEPS = 256;
 const WAVE_GRADIENT_STEPS = 256;
@@ -307,6 +313,13 @@ function setPlayingUI(playing) {
   playLabel.textContent = playing ? '一時停止' : '再生';
   statusLight.classList.toggle('is-playing', playing);
   statusText.textContent = playing ? 'PLAYING' : 'READY';
+}
+
+function updateRepeatButton() {
+  const nextMode = REPEAT_MODES[(REPEAT_MODES.indexOf(repeatMode) + 1) % REPEAT_MODES.length];
+  repeatButton.dataset.repeatMode = repeatMode;
+  repeatState.textContent = REPEAT_LABELS[repeatMode];
+  repeatButton.setAttribute('aria-label', `${REPEAT_DESCRIPTIONS[repeatMode]}。押すと${REPEAT_DESCRIPTIONS[nextMode]}`);
 }
 
 function refreshVisualStyles() {
@@ -1048,7 +1061,9 @@ async function removePlaylistTrack(index) {
       return;
     }
 
-    const replacementIndex = Math.min(index, playlist.length - 1);
+    const replacementIndex = repeatMode === 'all' && index >= playlist.length
+      ? 0
+      : Math.min(index, playlist.length - 1);
     loadPlaylistTrack(replacementIndex);
     statusText.textContent = 'LOADED';
     hideMessage();
@@ -1096,6 +1111,7 @@ playButton.addEventListener('click', async () => {
   isTrackTransitioning = false;
   try {
     if (audio.paused) {
+      stoppedByUser = false;
       await playLoadedTrack(actionId);
     } else {
       audio.pause();
@@ -1112,12 +1128,17 @@ playButton.addEventListener('click', async () => {
 stopButton.addEventListener('click', () => {
   playbackActionId += 1;
   isTrackTransitioning = false;
+  stoppedByUser = true;
   backgroundResumePending = false;
   resumeButton.hidden = true;
   hideMessage();
   audio.pause();
   audio.currentTime = 0;
   void enterPausedState();
+});
+repeatButton.addEventListener('click', () => {
+  repeatMode = REPEAT_MODES[(REPEAT_MODES.indexOf(repeatMode) + 1) % REPEAT_MODES.length];
+  updateRepeatButton();
 });
 resumeButton.addEventListener('click', resumeAfterBackground);
 safeExitButton.addEventListener('click', safeExit);
@@ -1147,18 +1168,26 @@ audio.addEventListener('ended', async () => {
   audio.currentTime = 0;
   progress.value = 0;
   try {
-    if (document.hidden || sessionEnded) {
+    if (stoppedByUser || playlist.length === 0 || document.hidden || sessionEnded) {
       await enterPausedState(false);
       return;
     }
 
-    if (repeatOne.checked) {
+    if (repeatMode === 'one') {
+      loadPlaylistTrack(currentTrackIndex);
       await playLoadedTrack(actionId);
       return;
     }
 
     if (currentTrackIndex + 1 < playlist.length) {
       loadPlaylistTrack(currentTrackIndex + 1);
+      statusText.textContent = 'LOADED';
+      await playLoadedTrack(actionId);
+      return;
+    }
+
+    if (repeatMode === 'all' && playlist.length > 0) {
+      loadPlaylistTrack(0);
       statusText.textContent = 'LOADED';
       await playLoadedTrack(actionId);
       return;
@@ -1246,6 +1275,7 @@ window.addEventListener('resize', resizeCanvas);
 
 document.querySelector('#appVersion').textContent = APP_META.version;
 document.querySelector('#lastUpdated').textContent = APP_META.lastUpdated;
+updateRepeatButton();
 renderPlaylist();
 refreshVisualStyles();
 resizeCanvas();

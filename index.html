@@ -112,11 +112,9 @@
             <span id="playLabel">再生</span>
           </button>
           <button class="stop-button" id="stopButton" type="button" disabled>停止</button>
-          <label class="repeat-control" for="repeatOne">
-            <input id="repeatOne" type="checkbox" />
-            <span class="repeat-switch" aria-hidden="true"></span>
-            <span>1曲リピート</span>
-          </label>
+          <button class="repeat-control" id="repeatButton" type="button" data-repeat-mode="off" aria-label="リピートなし。押すと1曲リピート">
+            <span>REPEAT</span><span class="repeat-state" id="repeatState">OFF</span>
+          </button>
         </div>
 
         <section class="session-controls" aria-label="再生セッションの操作">
