@@ -20,6 +20,11 @@
       mid: new Float32Array([0.91, 0.35, 0.65]),
       bright: new Float32Array([1.0, 0.88, 0.94]),
     },
+    emerald: {
+      deep: new Float32Array([0.035, 0.22, 0.17]),
+      mid: new Float32Array([0.22, 0.78, 0.48]),
+      bright: new Float32Array([0.81, 1.0, 0.65]),
+    },
   };
 
   const vertexSource = `
