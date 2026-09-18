@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
-  version: '0.4.0',
-  lastUpdated: '2026年9月17日 16:42',
+  version: '0.4.1',
+  lastUpdated: '2026年9月18日 12:39',
 });
 
 const audio = document.querySelector('#audio');
@@ -28,8 +28,10 @@ const statusText = document.querySelector('#statusText');
 const sensitivity = document.querySelector('#sensitivity');
 const sensitivityValue = document.querySelector('#sensitivityValue');
 const signalValue = document.querySelector('#signalValue');
+const visualStage = document.querySelector('.visual-stage');
 const canvas = document.querySelector('#visualizer');
 const ctx = canvas.getContext('2d');
+const mistCanvas = document.querySelector('#mistCanvas');
 const waveBuffer = document.createElement('canvas');
 const waveBufferContext = waveBuffer.getContext('2d');
 const sparkAccentBuffer = document.createElement('canvas');
@@ -117,6 +119,9 @@ let sparkParticles = [];
 let previousSparkLevel = 0;
 let sparkLastTimestamp = 0;
 let sparkLastBurst = 0;
+let mistRenderer = null;
+let mistTheme = 'neon';
+let mistContextLost = false;
 
 const TARGET_RENDER_FPS = 45;
 const RENDER_INTERVAL = 1000 / TARGET_RENDER_FPS;
@@ -165,6 +170,7 @@ function resizeCanvas() {
   invalidateAuroraCache(true);
   canvasWidth = canvas.clientWidth;
   canvasHeight = canvas.clientHeight;
+  if (mistRenderer) mistRenderer.resize(rect.width, rect.height, window.devicePixelRatio);
   if (!isRendering && !document.hidden && !sessionEnded) drawIdleFrame();
 }
 
@@ -344,6 +350,7 @@ function updateSignalValue(level, timestamp = 0, force = false) {
 
 function clearCanvas() {
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+  if (mistRenderer && !mistContextLost) mistRenderer.clear();
   updateSignalValue(0, 0, true);
 }
 
@@ -363,8 +370,30 @@ function drawIdleRing(width, height) {
 
 function drawIdleFrame() {
   if (!canvasWidth || !canvasHeight) return;
-  drawIdleRing(canvasWidth, canvasHeight);
+  if (visualMode === 'mist') {
+    if (mistRenderer && !mistContextLost) {
+      mistRenderer.draw(performance.now(), null, sensitivityAmount);
+      startRendering();
+    }
+  } else {
+    drawIdleRing(canvasWidth, canvasHeight);
+  }
   updateSignalValue(0, 0, true);
+}
+
+function ensureMistRenderer() {
+  if (mistContextLost) return false;
+  if (mistRenderer) return true;
+  try {
+    mistRenderer = window.createMistRenderer(mistCanvas);
+    mistRenderer.resize(canvasWidth, canvasHeight, window.devicePixelRatio);
+    mistRenderer.setTheme(mistTheme);
+    return true;
+  } catch (error) {
+    console.error(error);
+    showMessage('MISTを表示できません。このブラウザのWebGL設定をご確認ください。');
+    return false;
+  }
 }
 
 function averageLevel(values, count) {
@@ -862,7 +891,8 @@ function scheduleFrame() {
 }
 
 function startRendering() {
-  if (isRendering || document.hidden || audio.paused || !analyser) return;
+  if (isRendering || document.hidden || sessionEnded) return;
+  if (visualMode !== 'mist' && (audio.paused || !analyser)) return;
   isRendering = true;
   renderTimeline = null;
   scheduleFrame();
@@ -888,7 +918,8 @@ function render(timestamp = 0) {
     return;
   }
 
-  if (!analyser || audio.paused) {
+  const mistIdle = visualMode === 'mist' && (!analyser || audio.paused);
+  if ((!analyser || audio.paused) && !mistIdle) {
     stopRendering();
     if (!document.hidden && !sessionEnded) drawIdleFrame();
     return;
@@ -905,9 +936,9 @@ function render(timestamp = 0) {
     renderTimeline = timestamp;
   }
 
-  analyser.getByteFrequencyData(frequencyData);
+  if (!mistIdle) analyser.getByteFrequencyData(frequencyData);
   if (visualMode === 'aurora') analyser.getByteTimeDomainData(timeData);
-  ctx.clearRect(0, 0, width, height);
+  if (visualMode !== 'mist') ctx.clearRect(0, 0, width, height);
   let level = 0;
   if (visualMode === 'ring') level = drawRing(width, height, accentColor, accent2Color);
   else if (visualMode === 'wave') level = drawWave(width, height, accentColor, accent2Color);
@@ -915,6 +946,9 @@ function render(timestamp = 0) {
   else if (visualMode === 'orbit') level = drawOrbit(width, height, accentColor, accent2Color, timestamp);
   else if (visualMode === 'aurora') level = drawAurora(width, height, accentColor, accent2Color, timestamp);
   else if (visualMode === 'spark') level = drawSpark(width, height, accentColor, accent2Color, timestamp);
+  else if (visualMode === 'mist' && mistRenderer && !mistContextLost) {
+    level = mistRenderer.draw(timestamp, mistIdle ? null : frequencyData, sensitivityAmount);
+  }
   updateSignalValue(level, timestamp);
   scheduleFrame();
 }
@@ -1215,12 +1249,20 @@ sensitivity.addEventListener('input', () => {
   invalidateBarCache();
 });
 document.querySelectorAll('.visual-mode').forEach((button) => button.addEventListener('click', () => {
+  if (button.dataset.visual === 'mist' && !ensureMistRenderer()) return;
+  const wasMist = visualMode === 'mist';
   visualMode = button.dataset.visual;
   if (visualMode === 'spark') {
     sparkParticles = [];
     previousSparkLevel = 0;
     sparkLastTimestamp = 0;
   }
+  const showMist = visualMode === 'mist';
+  canvas.hidden = showMist;
+  mistCanvas.hidden = !showMist;
+  visualStage.classList.toggle('is-mist', showMist);
+  if (wasMist && !showMist && audio.paused) stopRendering();
+  if ((showMist || wasMist) && !isRendering && !document.hidden && !sessionEnded) drawIdleFrame();
   document.querySelectorAll('.visual-mode').forEach((mode) => {
     mode.classList.toggle('is-active', mode === button);
     mode.setAttribute('aria-pressed', String(mode === button));
@@ -1231,6 +1273,8 @@ document.querySelectorAll('.theme-dot').forEach((button) => button.addEventListe
   if (button.dataset.theme === 'amber') document.body.classList.add('theme-amber');
   if (button.dataset.theme === 'lavender') document.body.classList.add('theme-lavender');
   if (button.dataset.theme === 'sakura') document.body.classList.add('theme-sakura');
+  mistTheme = button.dataset.theme;
+  if (mistRenderer && !mistContextLost) mistRenderer.setTheme(mistTheme);
   refreshVisualStyles();
   if (!isRendering && !document.hidden && !sessionEnded) drawIdleFrame();
   document.querySelectorAll('.theme-dot').forEach((dot) => {
@@ -1245,6 +1289,19 @@ document.querySelector('#fullscreenButton').addEventListener('click', async () =
     else if (deck.requestFullscreen) await deck.requestFullscreen();
   } catch (error) {
     console.debug(error);
+  }
+});
+
+mistCanvas.addEventListener('webglcontextlost', (event) => {
+  event.preventDefault();
+  mistContextLost = true;
+  mistRenderer = null;
+  if (visualMode === 'mist') stopRendering();
+});
+mistCanvas.addEventListener('webglcontextrestored', () => {
+  mistContextLost = false;
+  if (visualMode === 'mist' && ensureMistRenderer() && !document.hidden && !sessionEnded) {
+    if (audio.paused) drawIdleFrame(); else startRendering();
   }
 });
 

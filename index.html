@@ -39,6 +39,7 @@
 
         <div class="visual-stage">
           <canvas id="visualizer" aria-label="音に反応する音楽ビジュアライザー"></canvas>
+          <canvas id="mistCanvas" aria-label="音に反応する霧のビジュアライザー" hidden></canvas>
           <div class="stage-center" aria-hidden="true">
             <span class="center-label">SIGNAL</span>
             <strong id="signalValue">00</strong>
@@ -83,6 +84,7 @@
               <button class="visual-mode" type="button" data-visual="orbit" aria-pressed="false">ORBIT</button>
               <button class="visual-mode" type="button" data-visual="aurora" aria-pressed="false">AURORA</button>
               <button class="visual-mode" type="button" data-visual="spark" aria-pressed="false">SPARK</button>
+              <button class="visual-mode" type="button" data-visual="mist" aria-pressed="false">MIST</button>
             </div>
           </fieldset>
           <fieldset class="theme-control">
@@ -133,6 +135,7 @@
       </footer>
     </main>
     <audio id="audio" preload="metadata"></audio>
+    <script src="mist.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
