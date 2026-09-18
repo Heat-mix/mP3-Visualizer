@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
   version: '0.4.1',
-  lastUpdated: '2026年9月18日 13:15',
+  lastUpdated: '2026年9月18日 13:52',
 });
 
 const audio = document.querySelector('#audio');
@@ -1269,11 +1269,13 @@ document.querySelectorAll('.visual-mode').forEach((button) => button.addEventLis
   });
 }));
 document.querySelectorAll('.theme-dot').forEach((button) => button.addEventListener('click', () => {
-  document.body.classList.remove('theme-amber', 'theme-lavender', 'theme-sakura', 'theme-emerald');
+  document.body.classList.remove('theme-amber', 'theme-lavender', 'theme-sakura', 'theme-emerald', 'theme-red', 'theme-yellow');
   if (button.dataset.theme === 'amber') document.body.classList.add('theme-amber');
   if (button.dataset.theme === 'lavender') document.body.classList.add('theme-lavender');
   if (button.dataset.theme === 'sakura') document.body.classList.add('theme-sakura');
   if (button.dataset.theme === 'emerald') document.body.classList.add('theme-emerald');
+  if (button.dataset.theme === 'red') document.body.classList.add('theme-red');
+  if (button.dataset.theme === 'yellow') document.body.classList.add('theme-yellow');
   mistTheme = button.dataset.theme;
   if (mistRenderer && !mistContextLost) mistRenderer.setTheme(mistTheme);
   refreshVisualStyles();

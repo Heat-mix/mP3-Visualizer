@@ -25,6 +25,16 @@
       mid: new Float32Array([0.22, 0.78, 0.48]),
       bright: new Float32Array([0.81, 1.0, 0.65]),
     },
+    red: {
+      deep: new Float32Array([0.28, 0.055, 0.1]),
+      mid: new Float32Array([0.91, 0.2, 0.29]),
+      bright: new Float32Array([1.0, 0.82, 0.83]),
+    },
+    yellow: {
+      deep: new Float32Array([0.28, 0.245, 0.055]),
+      mid: new Float32Array([0.94, 0.89, 0.25]),
+      bright: new Float32Array([1.0, 1.0, 0.76]),
+    },
   };
 
   const vertexSource = `
