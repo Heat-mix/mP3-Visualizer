@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
   version: '0.4.1',
-  lastUpdated: '2026年9月18日 13:52',
+  lastUpdated: '2026年9月19日 20:09',
 });
 
 const audio = document.querySelector('#audio');
@@ -54,6 +54,7 @@ let isConnected = false;
 let animationFrameId = null;
 let isRendering = false;
 let renderTimeline = null;
+let renderRecoveryAttempted = false;
 let audioSuspendTask = null;
 let backgroundResumePending = false;
 let sessionEnded = false;
@@ -61,6 +62,7 @@ let sensitivityAmount = Number(sensitivity.value);
 let visualMode = 'ring';
 let canvasWidth = 0;
 let canvasHeight = 0;
+let canvasPixelRatio = 0;
 let accentColor = '';
 let accent2Color = '';
 let lastSignalUpdate = -Infinity;
@@ -151,26 +153,40 @@ const formatTime = (value) => {
 
 function resizeCanvas() {
   const ratio = Math.min(window.devicePixelRatio || 1, 2);
-  const rect = canvas.getBoundingClientRect();
-  canvas.width = Math.round(rect.width * ratio);
-  canvas.height = Math.round(rect.height * ratio);
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  waveBuffer.width = canvas.width;
-  waveBuffer.height = canvas.height;
-  waveBufferContext.setTransform(ratio, 0, 0, ratio, 0, 0);
-  sparkAccentBuffer.width = canvas.width;
-  sparkAccentBuffer.height = canvas.height;
-  sparkAccentBufferContext.setTransform(ratio, 0, 0, ratio, 0, 0);
-  sparkAccent2Buffer.width = canvas.width;
-  sparkAccent2Buffer.height = canvas.height;
-  sparkAccent2BufferContext.setTransform(ratio, 0, 0, ratio, 0, 0);
-  invalidateRingCache(true);
-  invalidateWaveCache(true);
-  invalidateBarCache(true);
-  invalidateAuroraCache(true);
-  canvasWidth = canvas.clientWidth;
-  canvasHeight = canvas.clientHeight;
-  if (mistRenderer) mistRenderer.resize(rect.width, rect.height, window.devicePixelRatio);
+  const rect = visualStage.getBoundingClientRect();
+  const width = visualStage.clientWidth || rect.width;
+  const height = visualStage.clientHeight || rect.height;
+  if (!width || !height) return;
+
+  const pixelWidth = Math.max(1, Math.round(width * ratio));
+  const pixelHeight = Math.max(1, Math.round(height * ratio));
+  const ratioChanged = canvasPixelRatio !== ratio;
+  const geometryChanged = canvasWidth !== width || canvasHeight !== height || ratioChanged;
+
+  const resizeBackingStore = (targetCanvas, targetContext) => {
+    const sizeChanged = targetCanvas.width !== pixelWidth || targetCanvas.height !== pixelHeight;
+    if (sizeChanged) {
+      targetCanvas.width = pixelWidth;
+      targetCanvas.height = pixelHeight;
+    }
+    if (sizeChanged || ratioChanged) targetContext.setTransform(ratio, 0, 0, ratio, 0, 0);
+  };
+
+  resizeBackingStore(canvas, ctx);
+  resizeBackingStore(waveBuffer, waveBufferContext);
+  resizeBackingStore(sparkAccentBuffer, sparkAccentBufferContext);
+  resizeBackingStore(sparkAccent2Buffer, sparkAccent2BufferContext);
+
+  if (geometryChanged) {
+    invalidateRingCache(true);
+    invalidateWaveCache(true);
+    invalidateBarCache(true);
+    invalidateAuroraCache(true);
+  }
+  canvasWidth = width;
+  canvasHeight = height;
+  canvasPixelRatio = ratio;
+  if (mistRenderer) mistRenderer.resize(width, height, window.devicePixelRatio);
   if (!isRendering && !document.hidden && !sessionEnded) drawIdleFrame();
 }
 
@@ -895,12 +911,14 @@ function startRendering() {
   if (visualMode !== 'mist' && (audio.paused || !analyser)) return;
   isRendering = true;
   renderTimeline = null;
+  renderRecoveryAttempted = false;
   scheduleFrame();
 }
 
 function stopRendering(clear = false) {
   isRendering = false;
   renderTimeline = null;
+  renderRecoveryAttempted = false;
   if (animationFrameId !== null) {
     cancelAnimationFrame(animationFrameId);
     animationFrameId = null;
@@ -911,46 +929,63 @@ function stopRendering(clear = false) {
 function render(timestamp = 0) {
   animationFrameId = null;
   if (!isRendering) return;
-  const width = canvasWidth;
-  const height = canvasHeight;
-  if (!width || !height) {
-    scheduleFrame();
-    return;
-  }
-
-  const mistIdle = visualMode === 'mist' && (!analyser || audio.paused);
-  if ((!analyser || audio.paused) && !mistIdle) {
-    stopRendering();
-    if (!document.hidden && !sessionEnded) drawIdleFrame();
-    return;
-  }
-
-  if (renderTimeline !== null) {
-    const elapsed = timestamp - renderTimeline;
-    if (elapsed < RENDER_INTERVAL) {
+  try {
+    const width = canvasWidth;
+    const height = canvasHeight;
+    if (!width || !height) {
       scheduleFrame();
       return;
     }
-    renderTimeline = timestamp - (elapsed % RENDER_INTERVAL);
-  } else {
-    renderTimeline = timestamp;
-  }
 
-  if (!mistIdle) analyser.getByteFrequencyData(frequencyData);
-  if (visualMode === 'aurora') analyser.getByteTimeDomainData(timeData);
-  if (visualMode !== 'mist') ctx.clearRect(0, 0, width, height);
-  let level = 0;
-  if (visualMode === 'ring') level = drawRing(width, height, accentColor, accent2Color);
-  else if (visualMode === 'wave') level = drawWave(width, height, accentColor, accent2Color);
-  else if (visualMode === 'bar') level = drawBar(width, height, accentColor, accent2Color);
-  else if (visualMode === 'orbit') level = drawOrbit(width, height, accentColor, accent2Color, timestamp);
-  else if (visualMode === 'aurora') level = drawAurora(width, height, accentColor, accent2Color, timestamp);
-  else if (visualMode === 'spark') level = drawSpark(width, height, accentColor, accent2Color, timestamp);
-  else if (visualMode === 'mist' && mistRenderer && !mistContextLost) {
-    level = mistRenderer.draw(timestamp, mistIdle ? null : frequencyData, sensitivityAmount);
+    const mistIdle = visualMode === 'mist' && (!analyser || audio.paused);
+    if ((!analyser || audio.paused) && !mistIdle) {
+      stopRendering();
+      if (!document.hidden && !sessionEnded) drawIdleFrame();
+      return;
+    }
+
+    if (renderTimeline !== null) {
+      const elapsed = timestamp - renderTimeline;
+      if (elapsed < RENDER_INTERVAL) {
+        scheduleFrame();
+        return;
+      }
+      renderTimeline = timestamp - (elapsed % RENDER_INTERVAL);
+    } else {
+      renderTimeline = timestamp;
+    }
+
+    if (!mistIdle) analyser.getByteFrequencyData(frequencyData);
+    if (visualMode === 'aurora') analyser.getByteTimeDomainData(timeData);
+    if (visualMode !== 'mist') ctx.clearRect(0, 0, width, height);
+    let level = 0;
+    if (visualMode === 'ring') level = drawRing(width, height, accentColor, accent2Color);
+    else if (visualMode === 'wave') level = drawWave(width, height, accentColor, accent2Color);
+    else if (visualMode === 'bar') level = drawBar(width, height, accentColor, accent2Color);
+    else if (visualMode === 'orbit') level = drawOrbit(width, height, accentColor, accent2Color, timestamp);
+    else if (visualMode === 'aurora') level = drawAurora(width, height, accentColor, accent2Color, timestamp);
+    else if (visualMode === 'spark') level = drawSpark(width, height, accentColor, accent2Color, timestamp);
+    else if (visualMode === 'mist' && mistRenderer && !mistContextLost) {
+      level = mistRenderer.draw(timestamp, mistIdle ? null : frequencyData, sensitivityAmount);
+    }
+    updateSignalValue(level, timestamp);
+    renderRecoveryAttempted = false;
+    scheduleFrame();
+  } catch (error) {
+    console.error('Visualizer render error:', error);
+    const canRetry = !renderRecoveryAttempted
+      && !document.hidden
+      && !sessionEnded
+      && (visualMode === 'mist' || (!audio.paused && analyser));
+    isRendering = false;
+    renderTimeline = null;
+    animationFrameId = null;
+    if (canRetry) {
+      renderRecoveryAttempted = true;
+      isRendering = true;
+      scheduleFrame();
+    }
   }
-  updateSignalValue(level, timestamp);
-  scheduleFrame();
 }
 
 async function enterPausedState(drawIdle = !document.hidden) {
@@ -1261,8 +1296,12 @@ document.querySelectorAll('.visual-mode').forEach((button) => button.addEventLis
   canvas.hidden = showMist;
   mistCanvas.hidden = !showMist;
   visualStage.classList.toggle('is-mist', showMist);
+  resizeCanvas();
   if (wasMist && !showMist && audio.paused) stopRendering();
-  if ((showMist || wasMist) && !isRendering && !document.hidden && !sessionEnded) drawIdleFrame();
+  if (!document.hidden && !sessionEnded) {
+    if (!audio.paused && analyser) startRendering();
+    else if ((showMist || wasMist) && !isRendering) drawIdleFrame();
+  }
   document.querySelectorAll('.visual-mode').forEach((mode) => {
     mode.classList.toggle('is-active', mode === button);
     mode.setAttribute('aria-pressed', String(mode === button));
@@ -1303,8 +1342,12 @@ mistCanvas.addEventListener('webglcontextlost', (event) => {
 });
 mistCanvas.addEventListener('webglcontextrestored', () => {
   mistContextLost = false;
-  if (visualMode === 'mist' && ensureMistRenderer() && !document.hidden && !sessionEnded) {
+  if (document.hidden || sessionEnded) return;
+  if (visualMode === 'mist' && ensureMistRenderer()) {
+    resizeCanvas();
     if (audio.paused) drawIdleFrame(); else startRendering();
+  } else if (visualMode !== 'mist' && !audio.paused && analyser) {
+    startRendering();
   }
 });
 
