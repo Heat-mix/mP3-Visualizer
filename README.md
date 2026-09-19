@@ -52,7 +52,3 @@ RAINBOWは単純な色の重ね合わせではなく、各ビジュアルの形�
 - `app.js`: 再生、プレイリスト、音声解析、6種類のCanvas 2D描画
 - `mist.js`: MISTのWebGL / GLSL描画とカラーパレット
 - `manifest.webmanifest`, `assets/icons/`: ホーム画面追加用の設定とアイコン
-
-## GitHub Pagesへの公開
-
-上記のファイルとフォルダをリポジトリのルートに配置し、GitHubの **Settings > Pages** で `Deploy from a branch`、`main` ブランチの `/(root)` を選びます。
