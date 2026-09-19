@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
-  version: '0.4.1',
-  lastUpdated: '2026年9月19日 20:30',
+  version: '0.4.2',
+  lastUpdated: '2026年9月19日 21:01',
 });
 
 const audio = document.querySelector('#audio');
@@ -68,6 +68,7 @@ let accent2Color = '';
 let lastSignalUpdate = -Infinity;
 let displayedSignal = signalValue.textContent;
 let ringGradientCache = [];
+let ringRainbowGradientCache = [];
 let ringAngles = null;
 let ringGeometryWidth = 0;
 let ringGeometryHeight = 0;
@@ -79,11 +80,13 @@ let ringGradientAccent = '';
 let ringGradientAccent2 = '';
 let ringGradientSensitivity = 0;
 let waveGradientCache = [];
+let waveRainbowGradientCache = [];
 let waveXPositions = null;
 let waveGeometryWidth = 0;
 let waveGeometryBars = 0;
 let waveLineWidth = 0;
 let barGradientCache = [];
+let barRainbowGradientCache = [];
 let barHeightValues = null;
 let barAlphaValues = null;
 let barDataIndices = null;
@@ -102,6 +105,7 @@ let orbitBaseSines = null;
 let orbitBaseCosines = null;
 let orbitSpeedGroups = null;
 let orbitDataIndices = null;
+let orbitRainbowBaseIndices = null;
 let orbitFrequencyDataLength = 0;
 let orbitGeometryWidth = 0;
 let orbitGeometryHeight = 0;
@@ -110,6 +114,7 @@ let orbitCenterY = 0;
 let orbitMinimumSize = 0;
 let orbitBaseRadius = 0;
 let auroraGradient = null;
+let auroraRainbowGradient = null;
 let auroraXPositions = null;
 let auroraDataIndices = null;
 let auroraWaveValues = null;
@@ -124,6 +129,7 @@ let sparkLastBurst = 0;
 let mistRenderer = null;
 let mistTheme = 'neon';
 let mistContextLost = false;
+let isRainbowTheme = false;
 
 const TARGET_RENDER_FPS = 45;
 const RENDER_INTERVAL = 1000 / TARGET_RENDER_FPS;
@@ -141,8 +147,48 @@ const ORBIT_PARTICLES = 52;
 const ORBIT_SPEED_MULTIPLIERS = new Float64Array([1, 1 + 0.18, 1 + 2 * 0.18]);
 const ORBIT_PHASE_SINES = new Float64Array(ORBIT_SPEED_MULTIPLIERS.length);
 const ORBIT_PHASE_COSINES = new Float64Array(ORBIT_SPEED_MULTIPLIERS.length);
+const ORBIT_RAINBOW_PHASE_INDICES = new Uint16Array(ORBIT_SPEED_MULTIPLIERS.length);
 const AURORA_LAYERS = 4;
 const AURORA_SAMPLES = 72;
+const RAINBOW_COLOR_STEPS = 256;
+const RAINBOW_COLOR_MASK = RAINBOW_COLOR_STEPS - 1;
+const RAINBOW_STOPS = Object.freeze([
+  Object.freeze([255, 98, 104]),
+  Object.freeze([255, 138, 66]),
+  Object.freeze([255, 243, 92]),
+  Object.freeze([86, 230, 173]),
+  Object.freeze([94, 217, 255]),
+  Object.freeze([167, 124, 255]),
+  Object.freeze([255, 74, 162]),
+]);
+
+function buildRainbowColorTable(cyclic = false, tone = 0) {
+  const colors = new Array(RAINBOW_COLOR_STEPS);
+  const segmentCount = cyclic ? RAINBOW_STOPS.length : RAINBOW_STOPS.length - 1;
+  const denominator = cyclic ? RAINBOW_COLOR_STEPS : RAINBOW_COLOR_STEPS - 1;
+  for (let i = 0; i < RAINBOW_COLOR_STEPS; i += 1) {
+    const scaled = (i / denominator) * segmentCount;
+    const segment = Math.min(Math.floor(scaled), segmentCount - 1);
+    const amount = scaled - segment;
+    const from = RAINBOW_STOPS[segment];
+    const to = RAINBOW_STOPS[(segment + 1) % RAINBOW_STOPS.length];
+    const channels = new Uint8Array(3);
+    for (let channel = 0; channel < channels.length; channel += 1) {
+      let value = from[channel] + (to[channel] - from[channel]) * amount;
+      value = tone >= 0 ? value + (255 - value) * tone : value * (1 + tone);
+      channels[channel] = Math.round(value);
+    }
+    colors[i] = `rgb(${channels[0]} ${channels[1]} ${channels[2]})`;
+  }
+  return colors;
+}
+
+const RAINBOW_LINEAR_COLORS = buildRainbowColorTable();
+const RAINBOW_LINEAR_LIGHT_COLORS = buildRainbowColorTable(false, 0.34);
+const RAINBOW_LINEAR_DARK_COLORS = buildRainbowColorTable(false, -0.28);
+const RAINBOW_CYCLIC_COLORS = buildRainbowColorTable(true);
+const RAINBOW_CYCLIC_LIGHT_COLORS = buildRainbowColorTable(true, 0.34);
+const RAINBOW_CYCLIC_DARK_COLORS = buildRainbowColorTable(true, -0.28);
 
 const formatTime = (value) => {
   if (!Number.isFinite(value)) return '00:00';
@@ -420,6 +466,7 @@ function averageLevel(values, count) {
 
 function invalidateRingCache(geometryChanged = false) {
   ringGradientCache.length = 0;
+  ringRainbowGradientCache.length = 0;
   ringGradientAccent = '';
   ringGradientAccent2 = '';
   ringGradientSensitivity = 0;
@@ -445,6 +492,28 @@ function prepareRingCache(width, height, accent, accent2) {
     ringGeometryWidth = width;
     ringGeometryHeight = height;
     ringGradientCache.length = 0;
+    ringRainbowGradientCache.length = 0;
+  }
+
+  if (isRainbowTheme) {
+    if (ringRainbowGradientCache.length === RING_BARS) return;
+    const rainbowLength = 7 + ringMinimumSize * 0.2 * sensitivityAmount;
+    for (let i = 0; i < RING_BARS; i += 1) {
+      const colorIndex = Math.floor((i / RING_BARS) * RAINBOW_COLOR_STEPS) & RAINBOW_COLOR_MASK;
+      const gradient = ctx.createRadialGradient(
+        ringCenterX,
+        ringCenterY,
+        ringBaseRadius,
+        ringCenterX,
+        ringCenterY,
+        ringBaseRadius + rainbowLength,
+      );
+      gradient.addColorStop(0, RAINBOW_CYCLIC_LIGHT_COLORS[colorIndex]);
+      gradient.addColorStop(0.2, RAINBOW_CYCLIC_COLORS[colorIndex]);
+      gradient.addColorStop(1, RAINBOW_CYCLIC_DARK_COLORS[colorIndex]);
+      ringRainbowGradientCache.push(gradient);
+    }
+    return;
   }
 
   const gradientChanged = ringGradientCache.length !== RING_GRADIENT_STEPS
@@ -487,7 +556,7 @@ function drawRing(width, height, accent, accent2) {
     ctx.save();
     ctx.translate(ringCenterX, ringCenterY);
     ctx.rotate(ringAngles[i]);
-    ctx.strokeStyle = ringGradientCache[dataValue];
+    ctx.strokeStyle = isRainbowTheme ? ringRainbowGradientCache[i] : ringGradientCache[dataValue];
     ctx.globalAlpha = 0.28 + value * 0.72;
     ctx.lineWidth = 2.3 + value * 2.4;
     ctx.beginPath();
@@ -502,6 +571,7 @@ function drawRing(width, height, accent, accent2) {
 
 function invalidateWaveCache(geometryChanged = false) {
   waveGradientCache.length = 0;
+  waveRainbowGradientCache.length = 0;
   if (geometryChanged) {
     waveXPositions = null;
     waveGeometryWidth = 0;
@@ -519,6 +589,20 @@ function prepareWaveCache(width, height, bars, accent, accent2) {
     waveGeometryWidth = width;
     waveGeometryBars = bars;
     waveLineWidth = Math.max(2, bandWidth * 0.48);
+  }
+
+  if (isRainbowTheme) {
+    if (waveRainbowGradientCache.length === bars) return;
+    waveRainbowGradientCache.length = 0;
+    for (let i = 0; i < bars; i += 1) {
+      const colorIndex = Math.round((i / (bars - 1)) * RAINBOW_COLOR_MASK);
+      const gradient = waveBufferContext.createLinearGradient(0, 0, 0, height);
+      gradient.addColorStop(0, RAINBOW_LINEAR_DARK_COLORS[colorIndex]);
+      gradient.addColorStop(0.5, RAINBOW_LINEAR_LIGHT_COLORS[colorIndex]);
+      gradient.addColorStop(1, RAINBOW_LINEAR_DARK_COLORS[colorIndex]);
+      waveRainbowGradientCache.push(gradient);
+    }
+    return;
   }
 
   if (waveGradientCache.length === WAVE_GRADIENT_STEPS) return;
@@ -548,7 +632,7 @@ function drawWave(width, height, accent, accent2) {
     const value = dataValue / 255;
     const x = waveXPositions[i];
     const amplitude = value * height * 0.35 * sensitivityAmount;
-    waveBufferContext.strokeStyle = waveGradientCache[dataValue];
+    waveBufferContext.strokeStyle = isRainbowTheme ? waveRainbowGradientCache[i] : waveGradientCache[dataValue];
     waveBufferContext.globalAlpha = 0.22 + value * 0.7;
     waveBufferContext.beginPath();
     waveBufferContext.moveTo(x, centerY - amplitude);
@@ -558,7 +642,7 @@ function drawWave(width, height, accent, accent2) {
   waveBufferContext.restore();
 
   ctx.save();
-  ctx.shadowColor = accent;
+  ctx.shadowColor = isRainbowTheme ? 'rgba(255,255,255,.68)' : accent;
   ctx.shadowBlur = 13;
   ctx.drawImage(waveBuffer, 0, 0, width, height);
   ctx.restore();
@@ -567,6 +651,7 @@ function drawWave(width, height, accent, accent2) {
 
 function invalidateBarGradientCache() {
   barGradientCache.length = 0;
+  barRainbowGradientCache.length = 0;
   barGradientAccent = '';
   barGradientAccent2 = '';
 }
@@ -625,6 +710,19 @@ function prepareBarCache(width, height, accent, accent2) {
     invalidateBarGradientCache();
   }
 
+  if (isRainbowTheme) {
+    if (barRainbowGradientCache.length === BAR_BARS) return;
+    const maximumBarHeight = height * 0.68 * sensitivityAmount;
+    for (let i = 0; i < BAR_BARS; i += 1) {
+      const colorIndex = Math.round((i / (BAR_BARS - 1)) * RAINBOW_COLOR_MASK);
+      const gradient = ctx.createLinearGradient(0, barBaseline, 0, barBaseline - maximumBarHeight);
+      gradient.addColorStop(0, RAINBOW_LINEAR_DARK_COLORS[colorIndex]);
+      gradient.addColorStop(1, RAINBOW_LINEAR_LIGHT_COLORS[colorIndex]);
+      barRainbowGradientCache.push(gradient);
+    }
+    return;
+  }
+
   const gradientChanged = barGradientCache.length !== BAR_GRADIENT_STEPS
     || barGradientAccent !== accent
     || barGradientAccent2 !== accent2;
@@ -647,7 +745,7 @@ function drawBar(width, height, accent, accent2) {
   for (let i = 0; i < BAR_BARS; i += 1) {
     const dataValue = frequencyData[barDataIndices[i]];
     const barHeight = barHeightValues[dataValue];
-    ctx.fillStyle = barGradientCache[dataValue];
+    ctx.fillStyle = isRainbowTheme ? barRainbowGradientCache[i] : barGradientCache[dataValue];
     ctx.globalAlpha = barAlphaValues[dataValue];
     ctx.fillRect(barXPositions[i], barBaseline - barHeight, barWidth, barHeight);
   }
@@ -656,15 +754,17 @@ function drawBar(width, height, accent, accent2) {
 }
 
 function prepareOrbitCache(width, height) {
-  if (!orbitBaseSines || !orbitBaseCosines || !orbitSpeedGroups) {
+  if (!orbitBaseSines || !orbitBaseCosines || !orbitSpeedGroups || !orbitRainbowBaseIndices) {
     orbitBaseSines = new Float64Array(ORBIT_PARTICLES);
     orbitBaseCosines = new Float64Array(ORBIT_PARTICLES);
     orbitSpeedGroups = new Uint8Array(ORBIT_PARTICLES);
+    orbitRainbowBaseIndices = new Uint16Array(ORBIT_PARTICLES);
     for (let i = 0; i < ORBIT_PARTICLES; i += 1) {
       const baseAngle = (i / ORBIT_PARTICLES) * Math.PI * 2;
       orbitBaseSines[i] = Math.sin(baseAngle);
       orbitBaseCosines[i] = Math.cos(baseAngle);
       orbitSpeedGroups[i] = i % ORBIT_SPEED_MULTIPLIERS.length;
+      orbitRainbowBaseIndices[i] = Math.floor((((i / ORBIT_PARTICLES) + 0.25) % 1) * RAINBOW_COLOR_STEPS);
     }
   }
 
@@ -693,6 +793,7 @@ function drawOrbit(width, height, accent, accent2, timestamp) {
     const groupPhase = phase * ORBIT_SPEED_MULTIPLIERS[group];
     ORBIT_PHASE_SINES[group] = Math.sin(groupPhase);
     ORBIT_PHASE_COSINES[group] = Math.cos(groupPhase);
+    ORBIT_RAINBOW_PHASE_INDICES[group] = Math.floor((groupPhase / (Math.PI * 2)) * RAINBOW_COLOR_STEPS) & RAINBOW_COLOR_MASK;
   }
 
   ctx.save();
@@ -707,7 +808,9 @@ function drawOrbit(width, height, accent, accent2, timestamp) {
     const radius = orbitBaseRadius + value * orbitMinimumSize * 0.2 * sensitivityAmount;
     const x = orbitCenterX + directionX * radius;
     const y = orbitCenterY + directionY * radius;
-    const color = i % 2 ? accent : accent2;
+    const color = isRainbowTheme
+      ? RAINBOW_CYCLIC_COLORS[(orbitRainbowBaseIndices[i] + ORBIT_RAINBOW_PHASE_INDICES[speedGroup]) & RAINBOW_COLOR_MASK]
+      : (i % 2 ? accent : accent2);
     ctx.fillStyle = color;
     ctx.shadowColor = color;
     ctx.globalAlpha = 0.35 + value * 0.65;
@@ -721,6 +824,7 @@ function drawOrbit(width, height, accent, accent2, timestamp) {
 
 function invalidateAuroraCache(geometryChanged = false) {
   auroraGradient = null;
+  auroraRainbowGradient = null;
   if (geometryChanged) {
     auroraXPositions = null;
     auroraGeometryWidth = 0;
@@ -728,7 +832,13 @@ function invalidateAuroraCache(geometryChanged = false) {
 }
 
 function prepareAuroraCache(width, accent, accent2) {
-  if (!auroraGradient) {
+  if (isRainbowTheme && !auroraRainbowGradient) {
+    auroraRainbowGradient = ctx.createLinearGradient(0, 0, width, 0);
+    for (let i = 0; i < RAINBOW_STOPS.length; i += 1) {
+      const colorIndex = Math.round((i / (RAINBOW_STOPS.length - 1)) * RAINBOW_COLOR_MASK);
+      auroraRainbowGradient.addColorStop(i / (RAINBOW_STOPS.length - 1), RAINBOW_LINEAR_COLORS[colorIndex]);
+    }
+  } else if (!isRainbowTheme && !auroraGradient) {
     auroraGradient = ctx.createLinearGradient(0, 0, width, 0);
     auroraGradient.addColorStop(0, accent2);
     auroraGradient.addColorStop(0.5, accent);
@@ -781,10 +891,10 @@ function drawAurora(width, height, accent, accent2, timestamp) {
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   ctx.lineCap = 'round';
-  ctx.strokeStyle = auroraGradient;
+  ctx.strokeStyle = isRainbowTheme ? auroraRainbowGradient : auroraGradient;
   for (let layer = 0; layer < AURORA_LAYERS; layer += 1) {
     const centerY = height * (0.36 + layer * 0.09);
-    ctx.shadowColor = layer % 2 ? accent2 : accent;
+    ctx.shadowColor = isRainbowTheme ? 'rgba(255,255,255,.72)' : (layer % 2 ? accent2 : accent);
     ctx.shadowBlur = 18;
     ctx.globalAlpha = 0.18 + layer * 0.07;
     ctx.lineWidth = 4 + layer * 2;
@@ -822,6 +932,7 @@ function drawSpark(width, height, accent, accent2, timestamp) {
         angle,
         directionX: Math.cos(angle),
         directionY: Math.sin(angle),
+        rainbowColorIndex: Math.floor((((angle / (Math.PI * 2)) + 0.25) % 1) * RAINBOW_COLOR_STEPS),
         radius: originRadius * (0.82 + Math.random() * 0.18),
         speed: minimumSize * (0.24 + Math.random() * 0.34) * (0.75 + reactiveLevel),
         life,
@@ -859,8 +970,22 @@ function drawSpark(width, height, accent, accent2, timestamp) {
     particle.life -= delta;
     particle.radius += particle.speed * delta;
     const alpha = Math.max(0, particle.life / particle.maxLife);
-    const particleContext = particle.alternate ? sparkAccentBufferContext : sparkAccent2BufferContext;
-    if (particle.alternate) hasAccentParticles = true; else hasAccent2Particles = true;
+    const particleContext = isRainbowTheme
+      ? sparkAccentBufferContext
+      : (particle.alternate ? sparkAccentBufferContext : sparkAccent2BufferContext);
+    if (isRainbowTheme) {
+      if (particle.rainbowColorIndex === undefined) {
+        particle.rainbowColorIndex = Math.floor((((particle.angle / (Math.PI * 2)) + 0.25) % 1) * RAINBOW_COLOR_STEPS);
+      }
+      const color = RAINBOW_CYCLIC_COLORS[particle.rainbowColorIndex];
+      particleContext.strokeStyle = color;
+      particleContext.fillStyle = color;
+      hasAccentParticles = true;
+    } else if (particle.alternate) {
+      hasAccentParticles = true;
+    } else {
+      hasAccent2Particles = true;
+    }
     const x = centerX + particle.directionX * particle.radius;
     const y = centerY + particle.directionY * particle.radius;
     const tailRadius = Math.max(originRadius, particle.radius - particle.length);
@@ -889,7 +1014,7 @@ function drawSpark(width, height, accent, accent2, timestamp) {
   ctx.globalAlpha = 1;
   ctx.shadowBlur = 10;
   if (hasAccentParticles) {
-    ctx.shadowColor = accent;
+    ctx.shadowColor = isRainbowTheme ? 'rgba(255,255,255,.72)' : accent;
     ctx.drawImage(sparkAccentBuffer, 0, 0, width, height);
   }
   if (hasAccent2Particles) {
@@ -1308,13 +1433,15 @@ document.querySelectorAll('.visual-mode').forEach((button) => button.addEventLis
   });
 }));
 document.querySelectorAll('.theme-dot').forEach((button) => button.addEventListener('click', () => {
-  document.body.classList.remove('theme-amber', 'theme-lavender', 'theme-sakura', 'theme-emerald', 'theme-red', 'theme-yellow');
+  document.body.classList.remove('theme-amber', 'theme-lavender', 'theme-sakura', 'theme-emerald', 'theme-red', 'theme-yellow', 'theme-rainbow');
   if (button.dataset.theme === 'amber') document.body.classList.add('theme-amber');
   if (button.dataset.theme === 'lavender') document.body.classList.add('theme-lavender');
   if (button.dataset.theme === 'sakura') document.body.classList.add('theme-sakura');
   if (button.dataset.theme === 'emerald') document.body.classList.add('theme-emerald');
   if (button.dataset.theme === 'red') document.body.classList.add('theme-red');
   if (button.dataset.theme === 'yellow') document.body.classList.add('theme-yellow');
+  if (button.dataset.theme === 'rainbow') document.body.classList.add('theme-rainbow');
+  isRainbowTheme = button.dataset.theme === 'rainbow';
   mistTheme = button.dataset.theme;
   if (mistRenderer && !mistContextLost) mistRenderer.setTheme(mistTheme);
   refreshVisualStyles();

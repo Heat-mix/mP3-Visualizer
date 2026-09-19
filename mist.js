@@ -54,6 +54,7 @@ uniform vec2 uGlowPos;
 uniform vec3 uDeep;
 uniform vec3 uMidColor;
 uniform vec3 uBright;
+uniform float uRainbow;
 
 vec2 hash(vec2 p){
   p = vec2(dot(p, vec2(127.1,311.7)), dot(p, vec2(269.5,183.3)));
@@ -96,6 +97,16 @@ float warpedFog(vec2 p, float t){
   return fbm(p + 3.5*r + vec2(uAudio.x * 0.34, -uAudio.y * 0.22));
 }
 
+vec3 rainbowColor(float value){
+  float scaled = clamp(value, 0.0, 1.0) * 6.0;
+  if(scaled < 1.0) return mix(vec3(1.0,0.384,0.408), vec3(1.0,0.541,0.259), scaled);
+  if(scaled < 2.0) return mix(vec3(1.0,0.541,0.259), vec3(1.0,0.953,0.361), scaled - 1.0);
+  if(scaled < 3.0) return mix(vec3(1.0,0.953,0.361), vec3(0.337,0.902,0.678), scaled - 2.0);
+  if(scaled < 4.0) return mix(vec3(0.337,0.902,0.678), vec3(0.369,0.851,1.0), scaled - 3.0);
+  if(scaled < 5.0) return mix(vec3(0.369,0.851,1.0), vec3(0.655,0.486,1.0), scaled - 4.0);
+  return mix(vec3(0.655,0.486,1.0), vec3(1.0,0.29,0.635), scaled - 5.0);
+}
+
 void main(){
   vec2 uv = (gl_FragCoord.xy - 0.5*uRes) / uRes.y;
   float t = uTime * 0.5;
@@ -107,8 +118,22 @@ void main(){
   f += fine * edge * uAudio.z * 0.09;
   f += uAudio.w * 0.045;
 
-  vec3 col = mix(uDeep, uMidColor, smoothstep(0.25, 0.65, f));
-  col = mix(col, uBright, smoothstep(0.62, 0.95, f));
+  vec3 col;
+  if(uRainbow > 0.5){
+    float diagonal = clamp(
+      (gl_FragCoord.x / uRes.x + gl_FragCoord.y / uRes.y) * 0.5 + (f - 0.5) * 0.1,
+      0.0,
+      1.0
+    );
+    vec3 rainbowBase = rainbowColor(diagonal);
+    vec3 rainbowDeep = rainbowBase * 0.25;
+    vec3 rainbowBright = mix(rainbowBase, vec3(1.0), 0.7);
+    col = mix(rainbowDeep, rainbowBase, smoothstep(0.25, 0.65, f));
+    col = mix(col, rainbowBright, smoothstep(0.62, 0.95, f));
+  } else {
+    col = mix(uDeep, uMidColor, smoothstep(0.25, 0.65, f));
+    col = mix(col, uBright, smoothstep(0.62, 0.95, f));
+  }
 
   float vign = smoothstep(1.1, 0.2, length(uv));
   col *= mix(0.4, 1.0, vign) * (1.0 + uAudio.w * 0.12);
@@ -168,6 +193,7 @@ void main(){
       deep: gl.getUniformLocation(program, 'uDeep'),
       mid: gl.getUniformLocation(program, 'uMidColor'),
       bright: gl.getUniformLocation(program, 'uBright'),
+      rainbow: gl.getUniformLocation(program, 'uRainbow'),
     };
     const startTime = performance.now();
     let lowLevel = 0;
@@ -194,6 +220,7 @@ void main(){
     function setTheme(theme) {
       const palette = PALETTES[theme] || PALETTES.neon;
       gl.useProgram(program);
+      gl.uniform1f(uniforms.rainbow, theme === 'rainbow' ? 1 : 0);
       gl.uniform3fv(uniforms.deep, palette.deep);
       gl.uniform3fv(uniforms.mid, palette.mid);
       gl.uniform3fv(uniforms.bright, palette.bright);

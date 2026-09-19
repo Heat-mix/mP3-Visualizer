@@ -72,6 +72,16 @@ body.theme-amber { --accent:#ffd166; --accent-2:#ff7b54; --glow:rgba(255,209,102
 .theme-dot.lemon-yellow { --dot-a:#fffde8; --dot-b:#fff35c; --dot-c:#c8c62c; --dot-glow:rgba(255,243,92,.44); }
 body.theme-red { --accent:#ff6268; --accent-2:#b91f3d; --glow:rgba(255,82,91,.42); }
 body.theme-yellow { --accent:#fff35c; --accent-2:#c8c62c; --glow:rgba(255,243,92,.42); }
+.theme-dot.rainbow {
+  --dot-a:#fff4fc;
+  --dot-b:#5ed9ff;
+  --dot-c:#ff4aa2;
+  --dot-glow:rgba(167,124,255,.48);
+  background:
+    radial-gradient(circle at 27% 20%, rgba(255,255,255,.95) 0 4%, rgba(255,255,255,.5) 8%, rgba(255,255,255,.12) 15%, rgba(255,255,255,0) 23%),
+    radial-gradient(circle at 50% 50%, #ff6268 0 8%, #ff8a42 13% 20%, #fff35c 25% 32%, #56e6ad 37% 45%, #5ed9ff 50% 59%, #a77cff 64% 74%, #ff4aa2 80% 100%);
+}
+body.theme-rainbow { --accent:#5ed9ff; --accent-2:#ff4aa2; --glow:rgba(167,124,255,.42); }
 @media (max-width: 560px) { .app-shell { padding:calc(14px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left)); gap:12px; }.deck { border-radius:18px; padding:24px 17px 20px; }.deck-header { gap:8px; }.status-light { font-size:.62rem; }.visual-stage { margin:12px auto 4px; width:100%; }.file-select-row { margin-top:14px; }.file-button, .transport button, .session-controls button, .fullscreen-button { min-height:52px; }.control-bank { grid-template-columns:1fr 1fr; gap:20px 14px; margin-top:18px; }.visual-control { grid-column:1/-1; }.visual-options { grid-template-columns:repeat(3, minmax(0, 1fr)); }.visual-mode { min-height:46px; }.theme-control { grid-column:1; }.theme-options { gap:8px; }.knob-control { grid-column:2; }.fullscreen-button { grid-column:1/-1; }.progress-wrap { margin:22px 1px 15px; }.transport { grid-template-columns:1.35fr .8fr; }.repeat-control { min-height:48px; }.track-readout { font-size:.67rem; }.track-meta { gap:7px; }.manual-badge { font-size:.62rem; }.version-info { flex-direction:column; align-items:center; gap:3px; } }
 @media (min-width: 561px) and (max-width: 910px) { .control-bank { grid-template-columns:1fr 1fr; }.visual-control, .fullscreen-button { grid-column:1/-1; }.theme-control { grid-column:1; }.knob-control { grid-column:2; } }
 @media (max-width: 367px) { .theme-control, .knob-control { grid-column:1/-1; } }
