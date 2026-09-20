@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
-  version: '0.4.2',
-  lastUpdated: '2026年9月19日 21:01',
+  version: '0.4.3',
+  lastUpdated: '2026年9月20日 15:14',
 });
 
 const audio = document.querySelector('#audio');
@@ -126,6 +126,64 @@ let sparkParticles = [];
 let previousSparkLevel = 0;
 let sparkLastTimestamp = 0;
 let sparkLastBurst = 0;
+let starryX = null;
+let starryY = null;
+let starryDepth = null;
+let starrySize = null;
+let starryBrightness = null;
+let starryTwinkleSines = null;
+let starryTwinkleCosines = null;
+let starryTwinkleAmounts = null;
+let starryTwinkleGroups = null;
+let starryColorChoices = null;
+let starryRainbowIndices = null;
+let starryGeometryWidth = 0;
+let starryGeometryHeight = 0;
+let starryMinimumSize = 0;
+let starryBackgroundGradient = null;
+let starryNebulaBuffers = null;
+let starryGlowBuffers = null;
+let starryNebulaDensityMaps = null;
+let starryNebulaEdgeMaps = null;
+let starryNebulaHueMaps = null;
+let starryNebulaLightMaps = null;
+let starryNebulaBaseReady = false;
+let starryGradientWidth = 0;
+let starryGradientHeight = 0;
+let starryGradientAccent = '';
+let starryGradientAccent2 = '';
+let starryGradientRainbow = false;
+let starryLastTimestamp = 0;
+let starryPreviousLow = 0;
+let starryPreviousPeak = 0;
+let starrySmoothedEnergy = 0;
+let starryAudioLevel = 0;
+let starryTempoFactor = 1;
+let starryTempoTarget = 1;
+let starryLastBeatTime = -Infinity;
+let starryBeatInterval = 720;
+let starryBeatPush = 0;
+let starryBeatPushTarget = 0;
+let starryFlashLevel = 0;
+let starryLastFlashTime = -Infinity;
+let starryGlowIndex = 0;
+let starryPendingSecondaryIndex = -1;
+let starryPendingSecondaryAt = Infinity;
+let starryPendingSecondaryLevel = 0;
+let starryFlashRandomState = 0x83e21f4d;
+let starryNextMeteorAt = 0;
+let starryMeteorX = null;
+let starryMeteorY = null;
+let starryMeteorDirectionX = null;
+let starryMeteorDirectionY = null;
+let starryMeteorSpeed = null;
+let starryMeteorAge = null;
+let starryMeteorDuration = null;
+let starryMeteorLength = null;
+let starryMeteorWidth = null;
+let starryMeteorColorIndices = null;
+let starryMeteorRare = null;
+let starryRandomState = 0x6d2b79f5;
 let mistRenderer = null;
 let mistTheme = 'neon';
 let mistContextLost = false;
@@ -150,6 +208,38 @@ const ORBIT_PHASE_COSINES = new Float64Array(ORBIT_SPEED_MULTIPLIERS.length);
 const ORBIT_RAINBOW_PHASE_INDICES = new Uint16Array(ORBIT_SPEED_MULTIPLIERS.length);
 const AURORA_LAYERS = 4;
 const AURORA_SAMPLES = 72;
+const STARRY_STAR_COUNT = 144;
+const STARRY_FAR_COUNT = 84;
+const STARRY_MID_COUNT = 42;
+const STARRY_METEOR_SLOTS = 2;
+const STARRY_TWINKLE_SPEEDS = new Float64Array([0.00043, 0.00061, 0.00083]);
+const STARRY_TWINKLE_PHASE_SINES = new Float64Array(STARRY_TWINKLE_SPEEDS.length);
+const STARRY_TWINKLE_PHASE_COSINES = new Float64Array(STARRY_TWINKLE_SPEEDS.length);
+const STARRY_DEPTH_SPEEDS = new Float64Array([0.28, 0.68, 1.25]);
+const STARRY_NEBULA_COUNT = 3;
+const STARRY_NEBULA_TEXTURE_WIDTH = 192;
+const STARRY_NEBULA_TEXTURE_HEIGHT = 120;
+const STARRY_NEBULA_X = new Float64Array([0.52, 0.16, 0.76]);
+const STARRY_NEBULA_Y = new Float64Array([0.18, 0.58, 0.74]);
+const STARRY_NEBULA_WIDTHS = new Float64Array([0.92, 0.78, 0.8]);
+const STARRY_NEBULA_HEIGHTS = new Float64Array([0.52, 0.8, 0.66]);
+const STARRY_NEBULA_ALPHAS = new Float64Array([0.78, 0.82, 0.86]);
+const STARRY_NEBULA_DENSITIES = new Float64Array([1.02, 1.04, 1.1]);
+const STARRY_NEBULA_SPEED_RATIOS = new Float64Array([0.045, 0.067, 0.09]);
+const STARRY_NEBULA_ANGLES = new Float64Array([-0.12, 0.48, -0.34]);
+const STARRY_NEBULA_OFFSET_X = new Float32Array(STARRY_NEBULA_COUNT);
+const STARRY_NEBULA_OFFSET_Y = new Float32Array(STARRY_NEBULA_COUNT);
+const STARRY_NEBULA_DRAW_X = new Float32Array(STARRY_NEBULA_COUNT);
+const STARRY_NEBULA_DRAW_Y = new Float32Array(STARRY_NEBULA_COUNT);
+const STARRY_NEBULA_DRAW_WIDTH = new Float32Array(STARRY_NEBULA_COUNT);
+const STARRY_NEBULA_DRAW_HEIGHT = new Float32Array(STARRY_NEBULA_COUNT);
+const STARRY_NEBULA_SEEDS = new Uint16Array([137, 389, 761]);
+const STARRY_FLASH_COOLDOWN = 820;
+const STARRY_CLOUD_FLASH_COOLDOWN = 1050;
+const STARRY_FLASH_HOLD_MS = 46;
+const STARRY_FLASH_LEVELS = new Float32Array(STARRY_NEBULA_COUNT);
+const STARRY_FLASH_HOLD_UNTIL = new Float64Array(STARRY_NEBULA_COUNT);
+const STARRY_CLOUD_LAST_FLASH = new Float64Array(STARRY_NEBULA_COUNT).fill(-Infinity);
 const RAINBOW_COLOR_STEPS = 256;
 const RAINBOW_COLOR_MASK = RAINBOW_COLOR_STEPS - 1;
 const RAINBOW_STOPS = Object.freeze([
@@ -1025,6 +1115,740 @@ function drawSpark(width, height, accent, accent2, timestamp) {
   return Math.round(level * 100);
 }
 
+// STARRY reuses typed arrays and bakes low-resolution cloud density/light textures outside the frame loop.
+function starryRandom() {
+  starryRandomState = (starryRandomState * 1664525 + 1013904223) >>> 0;
+  return starryRandomState / 4294967296;
+}
+
+function starryFlashRandom() {
+  starryFlashRandomState = (starryFlashRandomState * 1664525 + 1013904223) >>> 0;
+  return starryFlashRandomState / 4294967296;
+}
+
+function starryNoiseHash(x, y, seed) {
+  let value = Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(seed, 1442695041);
+  value = Math.imul(value ^ (value >>> 13), 1274126177);
+  return ((value ^ (value >>> 16)) >>> 0) / 4294967295;
+}
+
+function starryValueNoise(x, y, seed) {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const tx = x - x0;
+  const ty = y - y0;
+  const smoothX = tx * tx * (3 - 2 * tx);
+  const smoothY = ty * ty * (3 - 2 * ty);
+  const topLeft = starryNoiseHash(x0, y0, seed);
+  const topRight = starryNoiseHash(x0 + 1, y0, seed);
+  const bottomLeft = starryNoiseHash(x0, y0 + 1, seed);
+  const bottomRight = starryNoiseHash(x0 + 1, y0 + 1, seed);
+  const top = topLeft + (topRight - topLeft) * smoothX;
+  const bottom = bottomLeft + (bottomRight - bottomLeft) * smoothX;
+  return top + (bottom - top) * smoothY;
+}
+
+function starryFbm(x, y, seed, octaves) {
+  let value = 0;
+  let amplitude = 0.56;
+  let amplitudeTotal = 0;
+  for (let octave = 0; octave < octaves; octave += 1) {
+    value += starryValueNoise(x, y, seed + octave * 37) * amplitude;
+    amplitudeTotal += amplitude;
+    x = x * 2.03 + 7.1;
+    y = y * 2.01 - 5.3;
+    amplitude *= 0.5;
+  }
+  return value / amplitudeTotal;
+}
+
+function starrySmoothstep(edge0, edge1, value) {
+  const amount = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
+  return amount * amount * (3 - 2 * amount);
+}
+
+function starryColorChannels(color) {
+  const hex = /^#([0-9a-f]{6})$/i.exec(color);
+  if (hex) {
+    const value = Number.parseInt(hex[1], 16);
+    return new Uint8Array([value >> 16, (value >> 8) & 255, value & 255]);
+  }
+  const channels = color.match(/[\d.]+/g);
+  if (channels && channels.length >= 3) {
+    return new Uint8Array([Number(channels[0]), Number(channels[1]), Number(channels[2])]);
+  }
+  return new Uint8Array([94, 217, 255]);
+}
+
+function buildStarryNebulaDensityMaps() {
+  if (starryNebulaDensityMaps) return;
+  const width = STARRY_NEBULA_TEXTURE_WIDTH;
+  const height = STARRY_NEBULA_TEXTURE_HEIGHT;
+  const pixelCount = width * height;
+  starryNebulaDensityMaps = new Array(STARRY_NEBULA_COUNT);
+  starryNebulaEdgeMaps = new Array(STARRY_NEBULA_COUNT);
+  starryNebulaHueMaps = new Array(STARRY_NEBULA_COUNT);
+  starryNebulaLightMaps = new Array(STARRY_NEBULA_COUNT);
+
+  for (let cloud = 0; cloud < STARRY_NEBULA_COUNT; cloud += 1) {
+    const seed = STARRY_NEBULA_SEEDS[cloud];
+    const angle = STARRY_NEBULA_ANGLES[cloud];
+    const angleCosine = Math.cos(angle);
+    const angleSine = Math.sin(angle);
+    const rawDensity = new Float32Array(pixelCount);
+    const densityMap = new Uint8Array(pixelCount);
+    const edgeMap = new Uint8Array(pixelCount);
+    const hueMap = new Uint8Array(pixelCount);
+    const lightMap = new Uint8Array(pixelCount);
+    for (let y = 0; y < height; y += 1) {
+      const v = y / (height - 1);
+      for (let x = 0; x < width; x += 1) {
+        const u = x / (width - 1);
+        const centeredX = u - 0.5;
+        const centeredY = v - 0.5;
+        const orientedU = centeredX * angleCosine - centeredY * angleSine + 0.5;
+        const orientedV = centeredX * angleSine + centeredY * angleCosine + 0.5;
+        const warpX = starryValueNoise(
+          orientedU * 1.38 + seed * 0.013,
+          orientedV * 1.18 - seed * 0.009,
+          seed + 11,
+        ) - 0.5;
+        const warpY = starryValueNoise(
+          orientedU * 1.22 - seed * 0.008,
+          orientedV * 1.42 + seed * 0.011,
+          seed + 29,
+        ) - 0.5;
+        const warpedU = orientedU + warpX * 0.22 + warpY * 0.05;
+        const warpedV = orientedV + warpY * 0.2 - warpX * 0.04;
+        const macroNoise = starryFbm(
+          warpedU * 1.55 + seed * 0.006,
+          warpedV * 1.34 - seed * 0.004,
+          seed + 53,
+          3,
+        );
+        const bodyNoise = starryFbm(
+          warpedU * 2.7 + 3.7,
+          warpedV * 2.25 - 2.9,
+          seed + 97,
+          2,
+        );
+        const detailNoise = starryValueNoise(
+          warpedU * 4.4 + 7.3,
+          warpedV * 3.7 - 5.1,
+          seed + 131,
+        );
+        const holeNoise = starryValueNoise(
+          warpedU * 2.05 + 11.6,
+          warpedV * 1.72 - 8.4,
+          seed + 173,
+        );
+        const curveCenter = 0.5 + Math.sin(
+          (warpedU * (0.82 + cloud * 0.11) + seed * 0.0017) * Math.PI * 2,
+        ) * (0.08 + cloud * 0.015);
+        const curveDistance = Math.abs(warpedV - curveCenter);
+        const curveMask = 0.42 + (1 - starrySmoothstep(
+          0.22 + cloud * 0.015,
+          0.58,
+          curveDistance,
+        )) * 0.58;
+        const macroDensity = starrySmoothstep(
+          0.26,
+          0.68,
+          macroNoise * 0.78 + bodyNoise * 0.22,
+        );
+        const bodyShape = starrySmoothstep(
+          0.24,
+          0.76,
+          bodyNoise * 0.72 + detailNoise * 0.28,
+        );
+        const cloudBody = macroDensity * curveMask * (0.22 + bodyShape * 0.78);
+        const ridge = 1 - Math.abs(bodyNoise * 2 - 1);
+        const fineRidge = 1 - Math.abs(detailNoise * 2 - 1);
+        const ridgeDetail = starrySmoothstep(
+          0.62,
+          0.9,
+          ridge * 0.7 + fineRidge * 0.3,
+        ) * cloudBody * 0.06;
+        const holeMask = starrySmoothstep(0.58, 0.83, holeNoise)
+          * starrySmoothstep(0.22, 0.68, macroDensity);
+        const edgeFade = starrySmoothstep(0, 0.16, u)
+          * starrySmoothstep(0, 0.16, 1 - u)
+          * starrySmoothstep(0, 0.18, v)
+          * starrySmoothstep(0, 0.18, 1 - v);
+        const pixel = y * width + x;
+        rawDensity[pixel] = Math.min(1,
+          (cloudBody + ridgeDetail)
+          * (1 - holeMask * 0.62)
+          * edgeFade
+          * STARRY_NEBULA_DENSITIES[cloud],
+        );
+        hueMap[pixel] = Math.round(Math.min(1,
+          macroNoise * 0.56 + bodyNoise * 0.29 + detailNoise * 0.15,
+        ) * 255);
+        lightMap[pixel] = Math.round(Math.min(1,
+          macroNoise * 0.5 + bodyNoise * 0.32 + (1 - holeNoise) * 0.18,
+        ) * 255);
+      }
+    }
+
+    for (let y = 0; y < height; y += 1) {
+      const above = Math.max(0, y - 1) * width;
+      const below = Math.min(height - 1, y + 1) * width;
+      for (let x = 0; x < width; x += 1) {
+        const index = y * width + x;
+        const left = rawDensity[y * width + Math.max(0, x - 1)];
+        const right = rawDensity[y * width + Math.min(width - 1, x + 1)];
+        const vertical = Math.abs(rawDensity[below + x] - rawDensity[above + x]);
+        const edge = Math.min(1, (Math.abs(right - left) + vertical) * 1.55);
+        densityMap[index] = Math.round(rawDensity[index] * 255);
+        edgeMap[index] = Math.round(edge * 255);
+      }
+    }
+    starryNebulaDensityMaps[cloud] = densityMap;
+    starryNebulaEdgeMaps[cloud] = edgeMap;
+    starryNebulaHueMaps[cloud] = hueMap;
+    starryNebulaLightMaps[cloud] = lightMap;
+  }
+}
+
+function rebuildStarryNebulaTextures(accent, accent2) {
+  if (!starryNebulaBuffers) {
+    starryNebulaBuffers = new Array(STARRY_NEBULA_COUNT);
+    starryGlowBuffers = new Array(STARRY_NEBULA_COUNT);
+    for (let i = 0; i < STARRY_NEBULA_COUNT; i += 1) {
+      starryNebulaBuffers[i] = document.createElement('canvas');
+      starryGlowBuffers[i] = document.createElement('canvas');
+      starryNebulaBuffers[i].width = STARRY_NEBULA_TEXTURE_WIDTH;
+      starryNebulaBuffers[i].height = STARRY_NEBULA_TEXTURE_HEIGHT;
+      starryGlowBuffers[i].width = STARRY_NEBULA_TEXTURE_WIDTH;
+      starryGlowBuffers[i].height = STARRY_NEBULA_TEXTURE_HEIGHT;
+    }
+  }
+  buildStarryNebulaDensityMaps();
+
+  const accentChannels = starryColorChannels(accent);
+  const accent2Channels = starryColorChannels(accent2);
+  const width = STARRY_NEBULA_TEXTURE_WIDTH;
+  const height = STARRY_NEBULA_TEXTURE_HEIGHT;
+  for (let cloud = 0; cloud < STARRY_NEBULA_COUNT; cloud += 1) {
+    const densityMap = starryNebulaDensityMaps[cloud];
+    const edgeMap = starryNebulaEdgeMaps[cloud];
+    const hueMap = starryNebulaHueMaps[cloud];
+    const lightMap = starryNebulaLightMaps[cloud];
+    const nebulaContext = starryNebulaBuffers[cloud].getContext('2d');
+    const glowContext = starryGlowBuffers[cloud].getContext('2d');
+    if (!starryNebulaBaseReady) {
+      const cloudImage = nebulaContext.createImageData(width, height);
+      for (let pixel = 0; pixel < densityMap.length; pixel += 1) {
+        const density = densityMap[pixel] / 255;
+        const edge = edgeMap[pixel] / 255;
+        const output = pixel * 4;
+        cloudImage.data[output] = Math.round(14 + density * 26 + edge * 3);
+        cloudImage.data[output + 1] = Math.round(22 + density * 42 + edge * 5);
+        cloudImage.data[output + 2] = Math.round(42 + density * 74 + edge * 8);
+        cloudImage.data[output + 3] = Math.round(Math.min(1, density * 1.08 + edge * 0.025) * 255);
+      }
+      nebulaContext.putImageData(cloudImage, 0, 0);
+    }
+
+    const glowImage = glowContext.createImageData(width, height);
+    for (let y = 0; y < height; y += 1) {
+      const v = y / (height - 1);
+      for (let x = 0; x < width; x += 1) {
+        const u = x / (width - 1);
+        const pixel = y * width + x;
+        const density = densityMap[pixel] / 255;
+        const edge = edgeMap[pixel] / 255;
+        const hueNoise = hueMap[pixel] / 255;
+        const lightField = lightMap[pixel] / 255;
+        const irregularLight = 0.22 + lightField * 0.78;
+        const gasPresence = Math.pow(density, 1.08);
+        const thicknessTransmission = 0.72 + (1 - density) * 0.28;
+        const thickShadow = 1 - starrySmoothstep(0.82, 1, density) * 0.28;
+        const structureLight = 0.08 + Math.pow(
+          starrySmoothstep(0.2, 0.78, hueNoise),
+          1.7,
+        ) * 1.2;
+        const transmission = Math.min(1,
+          gasPresence * thicknessTransmission + edge * 0.018,
+        );
+        const lightAlpha = Math.min(1,
+          irregularLight * transmission * thickShadow * structureLight,
+        );
+        const output = pixel * 4;
+
+        if (isRainbowTheme) {
+          const hue = (hueNoise * 2.2 + u * 0.18 + v * 0.12 + cloud * 0.23) % 1;
+          const scaledHue = hue * RAINBOW_STOPS.length;
+          const segment = Math.floor(scaledHue) % RAINBOW_STOPS.length;
+          const amount = scaledHue - Math.floor(scaledHue);
+          const from = RAINBOW_STOPS[segment];
+          const to = RAINBOW_STOPS[(segment + 1) % RAINBOW_STOPS.length];
+          glowImage.data[output] = Math.round(from[0] + (to[0] - from[0]) * amount);
+          glowImage.data[output + 1] = Math.round(from[1] + (to[1] - from[1]) * amount);
+          glowImage.data[output + 2] = Math.round(from[2] + (to[2] - from[2]) * amount);
+        } else {
+          const colorMix = hueMap[pixel] / 255;
+          const edgeLight = 0.07 + edge * 0.1;
+          for (let channel = 0; channel < 3; channel += 1) {
+            const base = accentChannels[channel]
+              + (accent2Channels[channel] - accentChannels[channel]) * colorMix;
+            glowImage.data[output + channel] = Math.round(base + (255 - base) * edgeLight);
+          }
+        }
+        glowImage.data[output + 3] = Math.round(lightAlpha * 255);
+      }
+    }
+    glowContext.clearRect(0, 0, width, height);
+    glowContext.putImageData(glowImage, 0, 0);
+  }
+  starryNebulaBaseReady = true;
+}
+
+function drawStarryNebula(width, height, timestamp, delta, directionX, directionY) {
+  const driftPulse = Math.sin(timestamp * 0.000011);
+  const baseCloudSpeed = Math.min(width, height) * 0.02;
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  for (let i = 0; i < STARRY_NEBULA_COUNT; i += 1) {
+    const movement = baseCloudSpeed * STARRY_NEBULA_SPEED_RATIOS[i] * delta;
+    STARRY_NEBULA_OFFSET_X[i] += directionX * movement;
+    STARRY_NEBULA_OFFSET_Y[i] += directionY * movement;
+    const scale = 1 + driftPulse * (0.004 + i * 0.0015);
+    const cloudWidth = width * STARRY_NEBULA_WIDTHS[i] * scale;
+    const cloudHeight = height * STARRY_NEBULA_HEIGHTS[i] / scale;
+    const baseX = width * STARRY_NEBULA_X[i] - cloudWidth * 0.5;
+    const baseY = height * STARRY_NEBULA_Y[i] - cloudHeight * 0.5;
+    let cloudX = baseX + STARRY_NEBULA_OFFSET_X[i];
+    let cloudY = baseY + STARRY_NEBULA_OFFSET_Y[i];
+    if (cloudX > width + cloudWidth * 0.05 || cloudY + cloudHeight < -height * 0.05) {
+      const resetX = -cloudWidth;
+      const resetY = height * (0.72 + i * 0.09) - cloudHeight * 0.5;
+      STARRY_NEBULA_OFFSET_X[i] = resetX - baseX;
+      STARRY_NEBULA_OFFSET_Y[i] = resetY - baseY;
+      cloudX = resetX;
+      cloudY = resetY;
+    }
+    STARRY_NEBULA_DRAW_X[i] = cloudX;
+    STARRY_NEBULA_DRAW_Y[i] = cloudY;
+    STARRY_NEBULA_DRAW_WIDTH[i] = cloudWidth;
+    STARRY_NEBULA_DRAW_HEIGHT[i] = cloudHeight;
+    ctx.globalAlpha = STARRY_NEBULA_ALPHAS[i] + driftPulse * 0.018;
+    ctx.drawImage(starryNebulaBuffers[i], cloudX, cloudY, cloudWidth, cloudHeight);
+  }
+  ctx.restore();
+
+  if (starryFlashLevel > 0.01) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let index = 0; index < STARRY_NEBULA_COUNT; index += 1) {
+      const flashLevel = STARRY_FLASH_LEVELS[index];
+      if (flashLevel <= 0.01) continue;
+      ctx.globalAlpha = flashLevel * 0.92;
+      ctx.drawImage(
+        starryGlowBuffers[index],
+        STARRY_NEBULA_DRAW_X[index],
+        STARRY_NEBULA_DRAW_Y[index],
+        STARRY_NEBULA_DRAW_WIDTH[index],
+        STARRY_NEBULA_DRAW_HEIGHT[index],
+      );
+    }
+    ctx.restore();
+  }
+}
+
+function chooseStarryGlowIndex(timestamp, excludedIndex = -1) {
+  const firstIndex = (starryGlowIndex + 2) % STARRY_NEBULA_COUNT;
+  let oldestIndex = -1;
+  let oldestTime = Infinity;
+  for (let offset = 0; offset < STARRY_NEBULA_COUNT; offset += 1) {
+    const index = (firstIndex + offset) % STARRY_NEBULA_COUNT;
+    if (index === excludedIndex) continue;
+    const lastFlash = STARRY_CLOUD_LAST_FLASH[index];
+    if (timestamp - lastFlash >= STARRY_CLOUD_FLASH_COOLDOWN) return index;
+    if (lastFlash < oldestTime) {
+      oldestTime = lastFlash;
+      oldestIndex = index;
+    }
+  }
+  return oldestIndex;
+}
+
+function activateStarryGlow(index, level, timestamp, holdMs = STARRY_FLASH_HOLD_MS) {
+  if (index < 0) return;
+  STARRY_FLASH_LEVELS[index] = Math.max(STARRY_FLASH_LEVELS[index], level);
+  STARRY_FLASH_HOLD_UNTIL[index] = Math.max(STARRY_FLASH_HOLD_UNTIL[index], timestamp + holdMs);
+  STARRY_CLOUD_LAST_FLASH[index] = timestamp;
+  starryGlowIndex = index;
+  starryFlashLevel = Math.max(starryFlashLevel, level);
+}
+
+function updateStarryFlashEnvelopes(timestamp, delta) {
+  let highestLevel = 0;
+  const decay = Math.exp(-delta * 3.1);
+  for (let index = 0; index < STARRY_NEBULA_COUNT; index += 1) {
+    let level = STARRY_FLASH_LEVELS[index];
+    if (timestamp >= STARRY_FLASH_HOLD_UNTIL[index]) level *= decay;
+    if (level < 0.005) level = 0;
+    STARRY_FLASH_LEVELS[index] = level;
+    if (level > highestLevel) highestLevel = level;
+  }
+  starryFlashLevel = highestLevel;
+}
+
+function prepareStarryCache(width, height, accent, accent2) {
+  if (!starryX) {
+    starryX = new Float32Array(STARRY_STAR_COUNT);
+    starryY = new Float32Array(STARRY_STAR_COUNT);
+    starryDepth = new Uint8Array(STARRY_STAR_COUNT);
+    starrySize = new Float32Array(STARRY_STAR_COUNT);
+    starryBrightness = new Float32Array(STARRY_STAR_COUNT);
+    starryTwinkleSines = new Float32Array(STARRY_STAR_COUNT);
+    starryTwinkleCosines = new Float32Array(STARRY_STAR_COUNT);
+    starryTwinkleAmounts = new Float32Array(STARRY_STAR_COUNT);
+    starryTwinkleGroups = new Uint8Array(STARRY_STAR_COUNT);
+    starryColorChoices = new Uint8Array(STARRY_STAR_COUNT);
+    starryRainbowIndices = new Uint8Array(STARRY_STAR_COUNT);
+    for (let i = 0; i < STARRY_STAR_COUNT; i += 1) {
+      const depth = i < STARRY_FAR_COUNT ? 0 : (i < STARRY_FAR_COUNT + STARRY_MID_COUNT ? 1 : 2);
+      const twinklePhase = starryRandom() * Math.PI * 2;
+      starryX[i] = starryRandom() * width;
+      starryY[i] = starryRandom() * height;
+      starryDepth[i] = depth;
+      starrySize[i] = depth === 0
+        ? 0.42 + starryRandom() * 0.44
+        : (depth === 1 ? 0.78 + starryRandom() * 0.62 : 1.2 + starryRandom() * 0.92);
+      starryBrightness[i] = depth === 0
+        ? 0.28 + starryRandom() * 0.34
+        : (depth === 1 ? 0.4 + starryRandom() * 0.36 : 0.56 + starryRandom() * 0.34);
+      starryTwinkleSines[i] = Math.sin(twinklePhase);
+      starryTwinkleCosines[i] = Math.cos(twinklePhase);
+      starryTwinkleAmounts[i] = starryRandom() < 0.38
+        ? 0.1 + starryRandom() * (depth === 0 ? 0.24 : 0.14)
+        : 0.025 + starryRandom() * 0.045;
+      starryTwinkleGroups[i] = Math.floor(starryRandom() * STARRY_TWINKLE_SPEEDS.length);
+      starryColorChoices[i] = Math.floor(starryRandom() * 256);
+      starryRainbowIndices[i] = Math.floor(starryRandom() * RAINBOW_COLOR_STEPS);
+    }
+    starryGeometryWidth = width;
+    starryGeometryHeight = height;
+
+    starryMeteorX = new Float32Array(STARRY_METEOR_SLOTS);
+    starryMeteorY = new Float32Array(STARRY_METEOR_SLOTS);
+    starryMeteorDirectionX = new Float32Array(STARRY_METEOR_SLOTS);
+    starryMeteorDirectionY = new Float32Array(STARRY_METEOR_SLOTS);
+    starryMeteorSpeed = new Float32Array(STARRY_METEOR_SLOTS);
+    starryMeteorAge = new Float32Array(STARRY_METEOR_SLOTS);
+    starryMeteorDuration = new Float32Array(STARRY_METEOR_SLOTS);
+    starryMeteorLength = new Float32Array(STARRY_METEOR_SLOTS);
+    starryMeteorWidth = new Float32Array(STARRY_METEOR_SLOTS);
+    starryMeteorColorIndices = new Uint8Array(STARRY_METEOR_SLOTS);
+    starryMeteorRare = new Uint8Array(STARRY_METEOR_SLOTS);
+  } else if (starryGeometryWidth !== width || starryGeometryHeight !== height) {
+    const scaleX = width / starryGeometryWidth;
+    const scaleY = height / starryGeometryHeight;
+    for (let i = 0; i < STARRY_STAR_COUNT; i += 1) {
+      starryX[i] *= scaleX;
+      starryY[i] *= scaleY;
+    }
+    for (let i = 0; i < STARRY_NEBULA_COUNT; i += 1) {
+      STARRY_NEBULA_OFFSET_X[i] *= scaleX;
+      STARRY_NEBULA_OFFSET_Y[i] *= scaleY;
+    }
+    starryGeometryWidth = width;
+    starryGeometryHeight = height;
+  }
+  starryMinimumSize = Math.min(width, height);
+
+  const gradientChanged = starryGradientWidth !== width
+    || starryGradientHeight !== height
+    || starryGradientAccent !== accent
+    || starryGradientAccent2 !== accent2
+    || starryGradientRainbow !== isRainbowTheme;
+  if (!gradientChanged) return;
+
+  const maximumSize = Math.max(width, height);
+  starryBackgroundGradient = ctx.createRadialGradient(
+    width * 0.62,
+    height * 0.2,
+    0,
+    width * 0.5,
+    height * 0.5,
+    maximumSize * 0.82,
+  );
+  starryBackgroundGradient.addColorStop(0, '#0b1230');
+  starryBackgroundGradient.addColorStop(0.5, '#040816');
+  starryBackgroundGradient.addColorStop(1, '#010208');
+  rebuildStarryNebulaTextures(accent, accent2);
+
+  starryGradientWidth = width;
+  starryGradientHeight = height;
+  starryGradientAccent = accent;
+  starryGradientAccent2 = accent2;
+  starryGradientRainbow = isRainbowTheme;
+}
+
+function updateStarryAudio(timestamp) {
+  if (starryPendingSecondaryIndex >= 0 && timestamp >= starryPendingSecondaryAt) {
+    activateStarryGlow(
+      starryPendingSecondaryIndex,
+      starryPendingSecondaryLevel,
+      timestamp,
+      38,
+    );
+    starryPendingSecondaryIndex = -1;
+    starryPendingSecondaryAt = Infinity;
+    starryPendingSecondaryLevel = 0;
+  }
+
+  const sampleCount = Math.min(64, frequencyData.length);
+  let total = 0;
+  let lowTotal = 0;
+  let midTotal = 0;
+  let highTotal = 0;
+  for (let i = 0; i < sampleCount; i += 1) {
+    const value = frequencyData[i] / 255;
+    total += value;
+    if (i < 8) lowTotal += value;
+    else if (i < 30) midTotal += value;
+    else highTotal += value;
+  }
+
+  const overall = total / sampleCount;
+  const low = lowTotal / Math.min(8, sampleCount);
+  const mid = midTotal / Math.max(1, Math.min(22, sampleCount - 8));
+  const high = highTotal / Math.max(1, sampleCount - 30);
+  const lowRise = Math.max(0, low - starryPreviousLow);
+  const peak = Math.max(low, mid * 0.86, high * 0.74);
+  const peakRise = Math.max(0, peak - starryPreviousPeak);
+  starryPreviousLow = low;
+  starryPreviousPeak = peak;
+  starrySmoothedEnergy += (overall - starrySmoothedEnergy) * 0.045;
+
+  const reactiveTarget = Math.min(1, overall * sensitivityAmount * 1.18);
+  starryAudioLevel += (reactiveTarget - starryAudioLevel)
+    * (reactiveTarget > starryAudioLevel ? 0.18 : 0.055);
+
+  const beatStrength = lowRise * (0.72 + sensitivityAmount * 0.32);
+  if (low > 0.16 && beatStrength > 0.043 && timestamp - starryLastBeatTime > 240) {
+    if (Number.isFinite(starryLastBeatTime)) {
+      const interval = Math.max(280, Math.min(1400, timestamp - starryLastBeatTime));
+      starryBeatInterval += (interval - starryBeatInterval) * 0.24;
+      starryTempoTarget = 0.82 + ((1400 - starryBeatInterval) / 1120) * 0.58;
+    }
+    starryBeatPushTarget = Math.max(
+      starryBeatPushTarget,
+      Math.min(0.42, 0.08 + beatStrength * sensitivityAmount * 2.4),
+    );
+    starryLastBeatTime = timestamp;
+  } else if (timestamp - starryLastBeatTime > 2400) {
+    starryTempoTarget = 0.82 + Math.min(0.28, starrySmoothedEnergy * 0.42);
+  }
+  starryTempoFactor += (starryTempoTarget - starryTempoFactor) * 0.022;
+
+  const flashStrength = Math.max(lowRise * 2.3, peakRise * 1.8, peak - 0.72);
+  const strongPeak = (peak > 0.32 || peakRise > 0.14)
+    && flashStrength * sensitivityAmount > 0.34;
+  if (timestamp - starryLastFlashTime > STARRY_FLASH_COOLDOWN && strongPeak) {
+    starryLastFlashTime = timestamp;
+    const mainIndex = chooseStarryGlowIndex(timestamp);
+    const mainLevel = Math.min(1, 0.4 + flashStrength * sensitivityAmount * 1.25);
+    activateStarryGlow(mainIndex, mainLevel, timestamp);
+
+    if (mainLevel > 0.9 && starryFlashRandom() < 0.16) {
+      const companionIndex = chooseStarryGlowIndex(timestamp, mainIndex);
+      activateStarryGlow(companionIndex, mainLevel * 0.46, timestamp, 34);
+    }
+
+    const secondaryChance = Math.min(0.76, 0.3 + flashStrength * sensitivityAmount * 0.52);
+    if (starryFlashRandom() < secondaryChance) {
+      starryPendingSecondaryIndex = chooseStarryGlowIndex(timestamp, mainIndex);
+      starryPendingSecondaryAt = timestamp + 150 + starryFlashRandom() * 80;
+      starryPendingSecondaryLevel = mainLevel * (0.46 + starryFlashRandom() * 0.12);
+    }
+  }
+  return Math.round(overall * 100);
+}
+
+function spawnStarryMeteor(timestamp, directionAngle) {
+  let slot = -1;
+  for (let i = 0; i < STARRY_METEOR_SLOTS; i += 1) {
+    if (starryMeteorAge[i] >= starryMeteorDuration[i]) {
+      slot = i;
+      break;
+    }
+  }
+  if (slot === -1) return;
+
+  const rare = starryRandom() < 0.075;
+  const angleOffset = 1.18 + starryRandom() * 1.18;
+  const meteorAngle = directionAngle + (starryRandom() < 0.5 ? angleOffset : -angleOffset);
+  starryMeteorX[slot] = starryRandom() * starryGeometryWidth;
+  starryMeteorY[slot] = starryRandom() * starryGeometryHeight;
+  starryMeteorDirectionX[slot] = Math.cos(meteorAngle);
+  starryMeteorDirectionY[slot] = Math.sin(meteorAngle);
+  starryMeteorSpeed[slot] = starryMinimumSize * (rare ? 0.62 : 0.78) * (0.88 + starryRandom() * 0.28);
+  starryMeteorAge[slot] = 0;
+  starryMeteorDuration[slot] = rare ? 0.9 + starryRandom() * 0.24 : 0.5 + starryRandom() * 0.22;
+  starryMeteorLength[slot] = starryMinimumSize * (rare ? 0.2 : 0.105) * (0.84 + starryRandom() * 0.26);
+  starryMeteorWidth[slot] = rare ? 1.55 : 1.05;
+  starryMeteorColorIndices[slot] = Math.floor(starryRandom() * RAINBOW_COLOR_STEPS);
+  starryMeteorRare[slot] = rare ? 1 : 0;
+  starryNextMeteorAt = timestamp + 12000 + starryRandom() * 22000;
+}
+
+function drawStarryMeteors(delta, accent, accent2) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineCap = 'round';
+  for (let i = 0; i < STARRY_METEOR_SLOTS; i += 1) {
+    const duration = starryMeteorDuration[i];
+    if (!duration || starryMeteorAge[i] >= duration) continue;
+    starryMeteorAge[i] += delta;
+    if (starryMeteorAge[i] >= duration) continue;
+    starryMeteorX[i] += starryMeteorDirectionX[i] * starryMeteorSpeed[i] * delta;
+    starryMeteorY[i] += starryMeteorDirectionY[i] * starryMeteorSpeed[i] * delta;
+    const progress = starryMeteorAge[i] / duration;
+    const fade = Math.min(1, progress / 0.12, (1 - progress) / 0.24);
+    const color = isRainbowTheme
+      ? RAINBOW_CYCLIC_COLORS[starryMeteorColorIndices[i]]
+      : (starryMeteorColorIndices[i] % 2 ? accent : accent2);
+    const x = starryMeteorX[i];
+    const y = starryMeteorY[i];
+    const tailX = x - starryMeteorDirectionX[i] * starryMeteorLength[i];
+    const tailY = y - starryMeteorDirectionY[i] * starryMeteorLength[i];
+    ctx.strokeStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = starryMeteorRare[i] ? 12 : 8;
+    ctx.globalAlpha = fade * 0.16;
+    ctx.lineWidth = starryMeteorWidth[i] * 3.2;
+    ctx.beginPath();
+    ctx.moveTo(tailX, tailY);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.globalAlpha = fade * 0.88;
+    ctx.lineWidth = starryMeteorWidth[i];
+    ctx.beginPath();
+    ctx.moveTo(tailX, tailY);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x, y, starryMeteorWidth[i] * 0.85, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawStarry(width, height, accent, accent2, timestamp) {
+  prepareStarryCache(width, height, accent, accent2);
+  const returningAfterGap = starryLastTimestamp && timestamp - starryLastTimestamp > 1000;
+  const delta = starryLastTimestamp ? Math.min((timestamp - starryLastTimestamp) / 1000, 0.05) : 0.016;
+  if (returningAfterGap) {
+    starryNextMeteorAt = timestamp + 8000 + starryRandom() * 14000;
+    starryMeteorAge.fill(1);
+    starryMeteorDuration.fill(0);
+    starryPreviousLow = 0;
+    starryPreviousPeak = 0;
+    starryAudioLevel = 0;
+    starryBeatPush = 0;
+    starryBeatPushTarget = 0;
+    starryFlashLevel = 0;
+    STARRY_FLASH_LEVELS.fill(0);
+    STARRY_FLASH_HOLD_UNTIL.fill(0);
+    starryPendingSecondaryIndex = -1;
+    starryPendingSecondaryAt = Infinity;
+    starryPendingSecondaryLevel = 0;
+    starryLastBeatTime = -Infinity;
+  }
+  starryLastTimestamp = timestamp;
+  const level = updateStarryAudio(timestamp);
+
+  const directionAngle = -0.24
+    + Math.sin(timestamp * 0.000026) * 0.07
+    + Math.sin(timestamp * 0.000009) * 0.035;
+  const directionX = Math.cos(directionAngle);
+  const directionY = Math.sin(directionAngle);
+  const baseSpeed = starryMinimumSize * 0.02 * starryTempoFactor;
+  starryBeatPushTarget *= Math.exp(-delta * 4.6);
+  const beatResponse = 1 - Math.exp(-delta * (starryBeatPushTarget > starryBeatPush ? 10 : 4));
+  starryBeatPush += (starryBeatPushTarget - starryBeatPush) * beatResponse;
+  updateStarryFlashEnvelopes(timestamp, delta);
+
+  for (let group = 0; group < STARRY_TWINKLE_SPEEDS.length; group += 1) {
+    const twinkleTime = timestamp * STARRY_TWINKLE_SPEEDS[group];
+    STARRY_TWINKLE_PHASE_SINES[group] = Math.sin(twinkleTime);
+    STARRY_TWINKLE_PHASE_COSINES[group] = Math.cos(twinkleTime);
+  }
+
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = starryBackgroundGradient;
+  ctx.fillRect(0, 0, width, height);
+  drawStarryNebula(width, height, timestamp, delta, directionX, directionY);
+
+  for (let i = 0; i < STARRY_STAR_COUNT; i += 1) {
+    const depth = starryDepth[i];
+    const beatSpeed = depth === 0 ? 1 : (1 + starryBeatPush * (depth === 1 ? 0.3 : 0.5));
+    const speed = baseSpeed * STARRY_DEPTH_SPEEDS[depth] * beatSpeed;
+    let x = starryX[i] + directionX * speed * delta;
+    let y = starryY[i] + directionY * speed * delta;
+    const margin = 6;
+    if (x < -margin) x += width + margin * 2;
+    else if (x > width + margin) x -= width + margin * 2;
+    if (y < -margin) y += height + margin * 2;
+    else if (y > height + margin) y -= height + margin * 2;
+    starryX[i] = x;
+    starryY[i] = y;
+
+    const group = starryTwinkleGroups[i];
+    const twinkle = starryTwinkleSines[i] * STARRY_TWINKLE_PHASE_COSINES[group]
+      + starryTwinkleCosines[i] * STARRY_TWINKLE_PHASE_SINES[group];
+    const alpha = Math.min(1, starryBrightness[i]
+      * (1 + twinkle * starryTwinkleAmounts[i])
+      * (0.82 + starryAudioLevel * 0.5));
+    const size = starrySize[i] * (1 + starryAudioLevel * 0.07);
+    const colorChoice = starryColorChoices[i];
+    const color = isRainbowTheme
+      ? (colorChoice < 92 ? RAINBOW_CYCLIC_COLORS[starryRainbowIndices[i]] : (colorChoice < 188 ? '#dce8ff' : '#ffffff'))
+      : (colorChoice < 54 ? accent : (colorChoice < 82 ? accent2 : (colorChoice < 198 ? '#dce8ff' : '#ffffff')));
+    ctx.fillStyle = color;
+
+    if (depth === 0) {
+      ctx.globalAlpha = alpha;
+      ctx.fillRect(x - size * 0.5, y - size * 0.5, size, size);
+      continue;
+    }
+
+    if (depth === 2) {
+      ctx.globalAlpha = alpha * 0.13;
+      ctx.fillRect(x - size * 1.8, y - 0.24, size * 3.6, 0.48);
+      ctx.fillRect(x - 0.24, y - size * 1.8, 0.48, size * 3.6);
+      if ((colorChoice & 7) === 0) {
+        ctx.globalAlpha = alpha * 0.26;
+        ctx.fillRect(x - size * 2.8, y - 0.3, size * 5.6, 0.6);
+        ctx.fillRect(x - 0.3, y - size * 2.8, 0.6, size * 5.6);
+      }
+    }
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.moveTo(x, y - size);
+    ctx.lineTo(x + size * 0.72, y);
+    ctx.lineTo(x, y + size);
+    ctx.lineTo(x - size * 0.72, y);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  if (!starryNextMeteorAt) starryNextMeteorAt = timestamp + 10000 + starryRandom() * 14000;
+  if (timestamp >= starryNextMeteorAt) spawnStarryMeteor(timestamp, directionAngle);
+  drawStarryMeteors(delta, accent, accent2);
+  ctx.restore();
+  return level;
+}
+
 function scheduleFrame() {
   if (isRendering && animationFrameId === null) {
     animationFrameId = requestAnimationFrame(render);
@@ -1082,7 +1906,7 @@ function render(timestamp = 0) {
 
     if (!mistIdle) analyser.getByteFrequencyData(frequencyData);
     if (visualMode === 'aurora') analyser.getByteTimeDomainData(timeData);
-    if (visualMode !== 'mist') ctx.clearRect(0, 0, width, height);
+    if (visualMode !== 'mist' && visualMode !== 'starry') ctx.clearRect(0, 0, width, height);
     let level = 0;
     if (visualMode === 'ring') level = drawRing(width, height, accentColor, accent2Color);
     else if (visualMode === 'wave') level = drawWave(width, height, accentColor, accent2Color);
@@ -1090,6 +1914,7 @@ function render(timestamp = 0) {
     else if (visualMode === 'orbit') level = drawOrbit(width, height, accentColor, accent2Color, timestamp);
     else if (visualMode === 'aurora') level = drawAurora(width, height, accentColor, accent2Color, timestamp);
     else if (visualMode === 'spark') level = drawSpark(width, height, accentColor, accent2Color, timestamp);
+    else if (visualMode === 'starry') level = drawStarry(width, height, accentColor, accent2Color, timestamp);
     else if (visualMode === 'mist' && mistRenderer && !mistContextLost) {
       level = mistRenderer.draw(timestamp, mistIdle ? null : frequencyData, sensitivityAmount);
     }
@@ -1421,6 +2246,7 @@ document.querySelectorAll('.visual-mode').forEach((button) => button.addEventLis
   canvas.hidden = showMist;
   mistCanvas.hidden = !showMist;
   visualStage.classList.toggle('is-mist', showMist);
+  visualStage.classList.toggle('is-starry', visualMode === 'starry');
   resizeCanvas();
   if (wasMist && !showMist && audio.paused) stopRendering();
   if (!document.hidden && !sessionEnded) {
