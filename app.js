@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
   version: '0.4.3',
-  lastUpdated: '2026年9月20日 15:14',
+  lastUpdated: '2026年9月20日 17:07',
 });
 
 const audio = document.querySelector('#audio');
@@ -158,6 +158,7 @@ let starryPreviousLow = 0;
 let starryPreviousPeak = 0;
 let starrySmoothedEnergy = 0;
 let starryAudioLevel = 0;
+let starryFrequencyHistoryReady = false;
 let starryTempoFactor = 1;
 let starryTempoTarget = 1;
 let starryLastBeatTime = -Infinity;
@@ -217,16 +218,19 @@ const STARRY_TWINKLE_PHASE_SINES = new Float64Array(STARRY_TWINKLE_SPEEDS.length
 const STARRY_TWINKLE_PHASE_COSINES = new Float64Array(STARRY_TWINKLE_SPEEDS.length);
 const STARRY_DEPTH_SPEEDS = new Float64Array([0.28, 0.68, 1.25]);
 const STARRY_NEBULA_COUNT = 3;
+const STARRY_NEBULA_AUDIO_LEVELS = new Float32Array(STARRY_NEBULA_COUNT);
+const STARRY_PREVIOUS_FREQUENCIES = new Uint8Array(64);
 const STARRY_NEBULA_TEXTURE_WIDTH = 192;
 const STARRY_NEBULA_TEXTURE_HEIGHT = 120;
 const STARRY_NEBULA_X = new Float64Array([0.52, 0.16, 0.76]);
 const STARRY_NEBULA_Y = new Float64Array([0.18, 0.58, 0.74]);
-const STARRY_NEBULA_WIDTHS = new Float64Array([0.92, 0.78, 0.8]);
-const STARRY_NEBULA_HEIGHTS = new Float64Array([0.52, 0.8, 0.66]);
+const STARRY_NEBULA_WIDTHS = new Float64Array([1, 0.86, 0.88]);
+const STARRY_NEBULA_HEIGHTS = new Float64Array([0.58, 0.87, 0.72]);
 const STARRY_NEBULA_ALPHAS = new Float64Array([0.78, 0.82, 0.86]);
 const STARRY_NEBULA_DENSITIES = new Float64Array([1.02, 1.04, 1.1]);
 const STARRY_NEBULA_SPEED_RATIOS = new Float64Array([0.045, 0.067, 0.09]);
 const STARRY_NEBULA_ANGLES = new Float64Array([-0.12, 0.48, -0.34]);
+const STARRY_NEBULA_HALO_SCALE = 1.14;
 const STARRY_NEBULA_OFFSET_X = new Float32Array(STARRY_NEBULA_COUNT);
 const STARRY_NEBULA_OFFSET_Y = new Float32Array(STARRY_NEBULA_COUNT);
 const STARRY_NEBULA_DRAW_X = new Float32Array(STARRY_NEBULA_COUNT);
@@ -240,6 +244,15 @@ const STARRY_FLASH_HOLD_MS = 46;
 const STARRY_FLASH_LEVELS = new Float32Array(STARRY_NEBULA_COUNT);
 const STARRY_FLASH_HOLD_UNTIL = new Float64Array(STARRY_NEBULA_COUNT);
 const STARRY_CLOUD_LAST_FLASH = new Float64Array(STARRY_NEBULA_COUNT).fill(-Infinity);
+const STARRY_GLOW_PALETTES = Object.freeze({
+  neon: Object.freeze(['#247cff', '#5ed9ff']),
+  amber: Object.freeze(['#ff6d24', '#ffb23d']),
+  yellow: Object.freeze(['#ffd000', '#fff24a']),
+  emerald: Object.freeze(['#16bb78', '#56e6ad']),
+  red: Object.freeze(['#d61f3c', '#ff6268']),
+  lavender: Object.freeze(['#7b32e5', '#b95cff']),
+  sakura: Object.freeze(['#e91d82', '#ff5bb1']),
+});
 const RAINBOW_COLOR_STEPS = 256;
 const RAINBOW_COLOR_MASK = RAINBOW_COLOR_STEPS - 1;
 const RAINBOW_STOPS = Object.freeze([
@@ -1326,8 +1339,9 @@ function rebuildStarryNebulaTextures(accent, accent2) {
   }
   buildStarryNebulaDensityMaps();
 
-  const accentChannels = starryColorChannels(accent);
-  const accent2Channels = starryColorChannels(accent2);
+  const glowPalette = STARRY_GLOW_PALETTES[mistTheme];
+  const glowDeepChannels = starryColorChannels(glowPalette ? glowPalette[0] : accent2);
+  const glowBrightChannels = starryColorChannels(glowPalette ? glowPalette[1] : accent);
   const width = STARRY_NEBULA_TEXTURE_WIDTH;
   const height = STARRY_NEBULA_TEXTURE_HEIGHT;
   for (let cloud = 0; cloud < STARRY_NEBULA_COUNT; cloud += 1) {
@@ -1378,7 +1392,7 @@ function rebuildStarryNebulaTextures(accent, accent2) {
         const output = pixel * 4;
 
         if (isRainbowTheme) {
-          const hue = (hueNoise * 2.2 + u * 0.18 + v * 0.12 + cloud * 0.23) % 1;
+          const hue = (hueNoise * 0.56 + u * 0.44 + v * 0.18 + cloud * 0.29) % 1;
           const scaledHue = hue * RAINBOW_STOPS.length;
           const segment = Math.floor(scaledHue) % RAINBOW_STOPS.length;
           const amount = scaledHue - Math.floor(scaledHue);
@@ -1388,15 +1402,17 @@ function rebuildStarryNebulaTextures(accent, accent2) {
           glowImage.data[output + 1] = Math.round(from[1] + (to[1] - from[1]) * amount);
           glowImage.data[output + 2] = Math.round(from[2] + (to[2] - from[2]) * amount);
         } else {
-          const colorMix = hueMap[pixel] / 255;
-          const edgeLight = 0.07 + edge * 0.1;
+          const colorMix = 0.18 + hueNoise * 0.72;
+          const highlightMix = 0.003 + Math.pow(lightAlpha, 4) * 0.018 + edge * 0.006;
           for (let channel = 0; channel < 3; channel += 1) {
-            const base = accentChannels[channel]
-              + (accent2Channels[channel] - accentChannels[channel]) * colorMix;
-            glowImage.data[output + channel] = Math.round(base + (255 - base) * edgeLight);
+            const base = glowDeepChannels[channel]
+              + (glowBrightChannels[channel] - glowDeepChannels[channel]) * colorMix;
+            glowImage.data[output + channel] = Math.round(base + (255 - base) * highlightMix);
           }
         }
-        glowImage.data[output + 3] = Math.round(lightAlpha * 255);
+        glowImage.data[output + 3] = Math.round(
+          Math.min(1, Math.pow(lightAlpha, 0.72) * 1.42) * 255,
+        );
       }
     }
     glowContext.clearRect(0, 0, width, height);
@@ -1439,13 +1455,47 @@ function drawStarryNebula(width, height, timestamp, delta, directionX, direction
   }
   ctx.restore();
 
-  if (starryFlashLevel > 0.01) {
+  let hasAudioPulse = false;
+  for (let index = 0; index < STARRY_NEBULA_COUNT; index += 1) {
+    if (STARRY_NEBULA_AUDIO_LEVELS[index] > 0.003) {
+      hasAudioPulse = true;
+      break;
+    }
+  }
+  if (hasAudioPulse || starryFlashLevel > 0.01) {
     ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalCompositeOperation = 'source-over';
+    if (hasAudioPulse) {
+      for (let index = 0; index < STARRY_NEBULA_COUNT; index += 1) {
+        const audioPulse = STARRY_NEBULA_AUDIO_LEVELS[index];
+        if (audioPulse <= 0.003) continue;
+        const cloudWidth = STARRY_NEBULA_DRAW_WIDTH[index];
+        const cloudHeight = STARRY_NEBULA_DRAW_HEIGHT[index];
+        const haloWidth = cloudWidth * STARRY_NEBULA_HALO_SCALE;
+        const haloHeight = cloudHeight * STARRY_NEBULA_HALO_SCALE;
+        const haloX = STARRY_NEBULA_DRAW_X[index] - (haloWidth - cloudWidth) * 0.5;
+        const haloY = STARRY_NEBULA_DRAW_Y[index] - (haloHeight - cloudHeight) * 0.5;
+        ctx.globalAlpha = Math.min(
+          isRainbowTheme ? 0.56 : 0.62,
+          audioPulse * (isRainbowTheme ? 0.72 : 0.82),
+        );
+        ctx.drawImage(starryGlowBuffers[index], haloX, haloY, haloWidth, haloHeight);
+      }
+    }
     for (let index = 0; index < STARRY_NEBULA_COUNT; index += 1) {
       const flashLevel = STARRY_FLASH_LEVELS[index];
       if (flashLevel <= 0.01) continue;
-      ctx.globalAlpha = flashLevel * 0.92;
+      const cloudWidth = STARRY_NEBULA_DRAW_WIDTH[index];
+      const cloudHeight = STARRY_NEBULA_DRAW_HEIGHT[index];
+      const haloWidth = cloudWidth * STARRY_NEBULA_HALO_SCALE;
+      const haloHeight = cloudHeight * STARRY_NEBULA_HALO_SCALE;
+      const haloX = STARRY_NEBULA_DRAW_X[index] - (haloWidth - cloudWidth) * 0.5;
+      const haloY = STARRY_NEBULA_DRAW_Y[index] - (haloHeight - cloudHeight) * 0.5;
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = flashLevel * (isRainbowTheme ? 0.26 : 0.23);
+      ctx.drawImage(starryGlowBuffers[index], haloX, haloY, haloWidth, haloHeight);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = flashLevel * 0.9;
       ctx.drawImage(
         starryGlowBuffers[index],
         STARRY_NEBULA_DRAW_X[index],
@@ -1589,6 +1639,17 @@ function prepareStarryCache(width, height, accent, accent2) {
   starryGradientRainbow = isRainbowTheme;
 }
 
+function updateStarryNebulaAudioLevel(index, averageRise, peakRise) {
+  const target = Math.min(
+    1,
+    (averageRise * 0.68 + peakRise * 0.32) * sensitivityAmount * 7.5,
+  );
+  const current = STARRY_NEBULA_AUDIO_LEVELS[index];
+  const response = target > current ? 0.75 : 0.3;
+  const next = current + (target - current) * response;
+  STARRY_NEBULA_AUDIO_LEVELS[index] = next < 0.003 ? 0 : next;
+}
+
 function updateStarryAudio(timestamp) {
   if (starryPendingSecondaryIndex >= 0 && timestamp >= starryPendingSecondaryAt) {
     activateStarryGlow(
@@ -1607,18 +1668,46 @@ function updateStarryAudio(timestamp) {
   let lowTotal = 0;
   let midTotal = 0;
   let highTotal = 0;
+  let lowRiseTotal = 0;
+  let midRiseTotal = 0;
+  let highRiseTotal = 0;
+  let lowRisePeak = 0;
+  let midRisePeak = 0;
+  let highRisePeak = 0;
   for (let i = 0; i < sampleCount; i += 1) {
-    const value = frequencyData[i] / 255;
+    const dataValue = frequencyData[i];
+    const value = dataValue / 255;
+    const rise = starryFrequencyHistoryReady
+      ? Math.max(0, dataValue - STARRY_PREVIOUS_FREQUENCIES[i]) / 255
+      : 0;
+    STARRY_PREVIOUS_FREQUENCIES[i] = dataValue;
     total += value;
-    if (i < 8) lowTotal += value;
-    else if (i < 30) midTotal += value;
-    else highTotal += value;
+    if (i < 8) {
+      lowTotal += value;
+      lowRiseTotal += rise;
+      if (rise > lowRisePeak) lowRisePeak = rise;
+    } else if (i < 30) {
+      midTotal += value;
+      midRiseTotal += rise;
+      if (rise > midRisePeak) midRisePeak = rise;
+    } else {
+      highTotal += value;
+      highRiseTotal += rise;
+      if (rise > highRisePeak) highRisePeak = rise;
+    }
   }
+  starryFrequencyHistoryReady = true;
 
   const overall = total / sampleCount;
-  const low = lowTotal / Math.min(8, sampleCount);
-  const mid = midTotal / Math.max(1, Math.min(22, sampleCount - 8));
-  const high = highTotal / Math.max(1, sampleCount - 30);
+  const lowCount = Math.min(8, sampleCount);
+  const midCount = Math.max(1, Math.min(22, sampleCount - 8));
+  const highCount = Math.max(1, sampleCount - 30);
+  const low = lowTotal / lowCount;
+  const mid = midTotal / midCount;
+  const high = highTotal / highCount;
+  updateStarryNebulaAudioLevel(0, lowRiseTotal / lowCount, lowRisePeak);
+  updateStarryNebulaAudioLevel(1, midRiseTotal / midCount, midRisePeak);
+  updateStarryNebulaAudioLevel(2, highRiseTotal / highCount, highRisePeak);
   const lowRise = Math.max(0, low - starryPreviousLow);
   const peak = Math.max(low, mid * 0.86, high * 0.74);
   const peakRise = Math.max(0, peak - starryPreviousPeak);
@@ -1752,6 +1841,9 @@ function drawStarry(width, height, accent, accent2, timestamp) {
     starryPreviousLow = 0;
     starryPreviousPeak = 0;
     starryAudioLevel = 0;
+    STARRY_NEBULA_AUDIO_LEVELS.fill(0);
+    STARRY_PREVIOUS_FREQUENCIES.fill(0);
+    starryFrequencyHistoryReady = false;
     starryBeatPush = 0;
     starryBeatPushTarget = 0;
     starryFlashLevel = 0;
