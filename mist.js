@@ -49,7 +49,11 @@ uniform vec2 uRes;
 uniform float uTime;
 uniform vec4 uAudio;
 uniform float uAttack;
+uniform float uBassImpulse;
+uniform float uHighImpulse;
 uniform float uGlow;
+uniform float uPeakFlash;
+uniform float uPeakFlashProgress;
 uniform vec2 uGlowPos;
 uniform vec2 uTouchPos;
 uniform vec2 uTouchWind;
@@ -94,9 +98,36 @@ float warpedFog(vec2 p, float t){
     fbm(p + vec2(0.0, 0.0) + 0.05*t + push),
     fbm(p + vec2(5.2, 1.3) - 0.04*t + vec2(-push.y, push.x))
   );
+  // MID帯域による霧内部の渦・ねじれ。
+  float midSwirl =
+    smoothstep(0.08, 0.72, uAudio.y);
+
+  // 場所によって回転方向と強さが変わる自然なムラを作る。
+  float swirlNoise =
+    noise(
+      p * 0.72 +
+      vec2(t * 0.055, -t * 0.041)
+    );
+
+  float swirlAngle =
+    swirlNoise *
+    midSwirl *
+    0.52;
+
+  float swirlCos = cos(swirlAngle);
+  float swirlSin = sin(swirlAngle);
+
+  mat2 swirlRotation = mat2(
+     swirlCos, -swirlSin,
+     swirlSin,  swirlCos
+  );
+
+  vec2 swirledQ =
+    swirlRotation * q;
+
   vec2 r = vec2(
-    fbm(p + 3.2*q + vec2(1.7,9.2) + 0.12*t + vec2(uAudio.y * 0.38, -uAudio.x * 0.16)),
-    fbm(p + 3.2*q + vec2(8.3,2.8) + 0.09*t + vec2(-uAudio.y * 0.3, uAttack * 0.16))
+    fbm(p + 3.2*swirledQ + vec2(1.7,9.2) + 0.12*t + vec2(uAudio.y * 0.38, -uAudio.x * 0.16)),
+    fbm(p + 3.2*swirledQ + vec2(8.3,2.8) + 0.09*t + vec2(-uAudio.y * 0.3, uAttack * 0.16))
   );
   return fbm(p + 3.5*r + vec2(uAudio.x * 0.34, -uAudio.y * 0.22));
 }
@@ -171,16 +202,80 @@ void main(){
     uTouchStrength *
     0.22;
 
+  // LOW帯域が作る、広く柔らかな音楽の風。
+  // タッチとは独立して霧全体へ作用する。
+  float bassWind = smoothstep(0.10, 0.72, uAudio.x);
+
+  // 完全な周期運動にせず、既存noiseからゆっくり風向きを揺らす。
+  float bassAngle =
+    noise(vec2(t * 0.18, 7.31)) * 1.15 +
+    noise(vec2(t * 0.07, 19.7)) * 0.55;
+
+  vec2 bassDir = vec2(
+    cos(bassAngle),
+    sin(bassAngle)
+  );
+
+  // 既存の霧に、少しムラのある圧力として与える。
+  float bassField =
+    0.72 +
+    0.28 * noise(
+      uv * 1.35 +
+      vec2(t * 0.09, -t * 0.06)
+    );
+
+  // LOWが持続している間の、広く柔らかな風。
+  vec2 bassSustainFlow =
+    bassDir *
+    bassWind *
+    bassField *
+    0.055;
+
+  // LOWが立ち上がった瞬間だけ加わる短い圧力。
+  vec2 bassImpulseFlow =
+    bassDir *
+    uBassImpulse *
+    bassField *
+    0.040;
+
+  vec2 musicFlow =
+    bassSustainFlow +
+    bassImpulseFlow;
+
   vec2 fogUv =
     uv -
     mainFlow +
-    sideFlow;
+    sideFlow -
+    musicFlow;
 
   float f = warpedFog(fogUv * 1.6, t);
   f = f * 0.5 + 0.5;
   float edge = smoothstep(0.28, 0.55, f) * (1.0 - smoothstep(0.68, 0.88, f));
   float fine = noise(fogUv * 17.6 + vec2(t * 0.11, -t * 0.17));
   f += fine * edge * uAudio.z * 0.09;
+
+  // HIGH帯域による霧の細部・縁の乱流。
+  float highDetail =
+    smoothstep(0.10, 0.68, uAudio.z);
+
+  float highNoise =
+    noise(
+      fogUv * 7.5 +
+      vec2(
+        t * 0.42,
+        -t * 0.31
+      )
+    );
+
+  float highTurbulence =
+    highNoise *
+    edge *
+    (
+      highDetail * 0.085 +
+      uHighImpulse * 0.055
+    );
+
+  f += highTurbulence;
   f += uAudio.w * 0.045;
 
   vec3 col;
@@ -203,10 +298,123 @@ void main(){
   float vign = smoothstep(1.1, 0.2, length(uv));
   col *= mix(0.4, 1.0, vign) * (1.0 + uAudio.w * 0.12);
 
-  float glowDistance = length(gl_FragCoord.xy / uRes - uGlowPos);
-  float glowShape = 1.0 - smoothstep(0.03, 0.42, glowDistance);
-  float fogInterior = smoothstep(0.25, 0.65, f);
-  col = mix(col, vec3(1.0), glowShape * glowShape * fogInterior * uGlow * 0.55);
+  // Stage 5: music light inside the mist.
+  vec2 glowUv =
+    gl_FragCoord.xy / uRes;
+
+  float glowDistance =
+    length(glowUv - uGlowPos);
+
+  float fogVeinWide =
+    smoothstep(0.28, 0.52, f) *
+    (
+      1.0 -
+      smoothstep(0.76, 0.92, f)
+    );
+
+  float fogVeinCore =
+    smoothstep(0.46, 0.58, f) *
+    (
+      1.0 -
+      smoothstep(0.64, 0.76, f)
+    );
+
+  float lightWave =
+    exp(
+      -glowDistance * 5.2
+    );
+
+  float lightBreakup =
+    0.65 +
+    0.35 *
+    noise(
+      fogUv * 3.8 +
+      vec2(
+        t * 0.20,
+        -t * 0.16
+      )
+    );
+
+  float wideLight =
+    fogVeinWide *
+    lightWave *
+    lightBreakup *
+    uGlow;
+
+  float coreVeinLight =
+    fogVeinCore *
+    lightWave *
+    lightBreakup *
+    uGlow;
+
+  float veinLight =
+    wideLight * 0.55 +
+    coreVeinLight * 1.15;
+
+  float lightCore =
+    fogVeinCore *
+    lightWave *
+    uAttack *
+    0.38;
+
+  float musicLight =
+    clamp(
+      veinLight +
+      lightCore,
+      0.0,
+      0.72
+    );
+
+  vec3 musicGlowColor =
+    mix(
+      uBright,
+      vec3(1.0),
+      0.38
+    );
+
+  col = mix(
+    col,
+    musicGlowColor,
+    musicLight
+  );
+
+  // Stage 7: radial peak light spreads from the LEVEL display.
+  vec2 flashUv = gl_FragCoord.xy / uRes;
+  vec2 flashCenter = vec2(0.5, 0.5);
+  vec2 flashOffset = (flashUv - flashCenter) * vec2(uRes.x / uRes.y, 1.0);
+  float flashDistance = length(flashOffset);
+  float flashProgress = clamp(uPeakFlashProgress, 0.0, 1.0);
+  float expansion = 1.0 - pow(1.0 - flashProgress, 2.2);
+  float flashRadius = mix(0.02, 0.95, expansion);
+
+  float flashFill = 1.0 - smoothstep(
+    flashRadius - 0.16,
+    flashRadius + 0.04,
+    flashDistance
+  );
+  float flashRing = 1.0 - smoothstep(
+    0.00,
+    0.10,
+    abs(flashDistance - flashRadius)
+  );
+  float flashCore = exp(-flashDistance * 12.0) *
+    (1.0 - smoothstep(0.00, 0.42, flashProgress));
+  float flashEnvelope = smoothstep(0.00, 0.12, flashProgress) *
+    (1.0 - smoothstep(0.68, 1.00, flashProgress));
+  float radialFlash = (
+    flashFill * 0.34 +
+    flashRing * 0.46 +
+    flashCore * 0.62
+  ) * flashEnvelope * uPeakFlash;
+  vec3 peakFlashColor = mix(uBright, vec3(1.0), 0.52);
+  col = mix(col, peakFlashColor, clamp(radialFlash, 0.0, 0.52));
+
+  float fogInterior =
+    smoothstep(
+      0.25,
+      0.65,
+      f
+    );
 
   // 指の中心で、霧そのものが白く光る。
   float touchCoreLight =
@@ -277,7 +485,11 @@ void main(){
       time: gl.getUniformLocation(program, 'uTime'),
       audio: gl.getUniformLocation(program, 'uAudio'),
       attack: gl.getUniformLocation(program, 'uAttack'),
+      bassImpulse: gl.getUniformLocation(program, 'uBassImpulse'),
+      highImpulse: gl.getUniformLocation(program, 'uHighImpulse'),
       glow: gl.getUniformLocation(program, 'uGlow'),
+      peakFlash: gl.getUniformLocation(program, 'uPeakFlash'),
+      peakFlashProgress: gl.getUniformLocation(program, 'uPeakFlashProgress'),
       glowPosition: gl.getUniformLocation(program, 'uGlowPos'),
       touchPosition: gl.getUniformLocation(program, 'uTouchPos'),
       touchWind: gl.getUniformLocation(program, 'uTouchWind'),
@@ -294,6 +506,8 @@ void main(){
     let highLevel = 0;
     let overallLevel = 0;
     let attackLevel = 0;
+    let bassImpulse = 0;
+    let highImpulse = 0;
     let previousLow = 0;
     let previousMid = 0;
     let previousHigh = 0;
@@ -301,6 +515,10 @@ void main(){
     let glowStartTime = -Infinity;
     let lastGlowTime = -Infinity;
     let glowStrength = 0;
+    let peakFlash = 0;
+    let lastPeakFlashTime = -Infinity;
+    let peakFlashStartTime = -Infinity;
+    let peakFlashProgress = 1;
     let glowX = 0.5;
     let glowY = 0.5;
     let touchX = 0.5;
@@ -321,8 +539,14 @@ void main(){
 
     function resetAudio() {
       lowLevel = midLevel = highLevel = overallLevel = attackLevel = 0;
+      bassImpulse = 0;
+      highImpulse = 0;
       previousLow = previousMid = previousHigh = 0;
       glowStartTime = -Infinity;
+      peakFlash = 0;
+      lastPeakFlashTime = -Infinity;
+      peakFlashStartTime = -Infinity;
+      peakFlashProgress = 1;
     }
 
     function setPointerInteraction(x, y, directionX, directionY, strength) {
@@ -417,7 +641,10 @@ void main(){
       const midInput = midSum / 16;
       const highInput = (highSum / 44) * 0.7 + highPeak * 0.3;
       const overallInput = total / 64;
-      const rise = Math.max(0, lowInput - previousLow, midInput - previousMid, highInput - previousHigh);
+      const lowRise = Math.max(0, lowInput - previousLow);
+      const midRise = Math.max(0, midInput - previousMid);
+      const highRise = Math.max(0, highInput - previousHigh);
+      const rise = Math.max(lowRise, midRise, highRise);
       previousLow = lowInput;
       previousMid = midInput;
       previousHigh = highInput;
@@ -430,6 +657,12 @@ void main(){
       const sensitivityTarget = 0.28 + 0.72 * Math.max(0, Math.min(1, (sensitivity - 0.5) / 1.9));
       if (sensitivityInfluence === null) sensitivityInfluence = sensitivityTarget;
       else sensitivityInfluence += (sensitivityTarget - sensitivityInfluence) * 0.12;
+      const bassImpulseInput = Math.min(1, lowRise * 4.2) * sensitivityInfluence;
+      bassImpulse += (bassImpulseInput - bassImpulse)
+        * (bassImpulseInput > bassImpulse ? 0.42 : 0.13);
+      const highImpulseInput = Math.min(1, highRise * 5.0) * sensitivityInfluence;
+      highImpulse += (highImpulseInput - highImpulse)
+        * (highImpulseInput > highImpulse ? 0.48 : 0.18);
       const attackInput = Math.min(1, rise * 2.6) * sensitivityInfluence;
       attackLevel += (attackInput - attackLevel) * (attackInput > attackLevel ? 0.22 : 0.1);
 
@@ -442,6 +675,23 @@ void main(){
         glowStrength = Math.min(1, 0.5 + rise * 2) * glowReadiness;
         glowX = 0.2 + Math.random() * 0.6;
         glowY = 0.2 + Math.random() * 0.6;
+      }
+      const peakEnergy = Math.max(lowPeak, midInput, highPeak);
+      const peakFlashReady = rise > 0.16 && peakEnergy > 0.72 && overallInput > 0.30;
+      if (peakFlashReady && timestamp - lastPeakFlashTime > 8000) {
+        lastPeakFlashTime = timestamp;
+        peakFlashStartTime = timestamp;
+        peakFlash = 1;
+      }
+      const peakFlashDuration = 900;
+      if (peakFlashStartTime > -Infinity) {
+        peakFlashProgress = Math.min(1, (timestamp - peakFlashStartTime) / peakFlashDuration);
+        if (peakFlashProgress >= 1) {
+          peakFlash = 0;
+        }
+      } else {
+        peakFlashProgress = 1;
+        peakFlash = 0;
       }
       return Math.round((total / 64) * 100);
     }
@@ -462,7 +712,11 @@ void main(){
         soften(highLevel * 3.3 * influence),
         soften(overallLevel * 2.1 * influence));
       gl.uniform1f(uniforms.attack, attackLevel);
+      gl.uniform1f(uniforms.bassImpulse, bassImpulse);
+      gl.uniform1f(uniforms.highImpulse, highImpulse);
       gl.uniform1f(uniforms.glow, glow);
+      gl.uniform1f(uniforms.peakFlash, peakFlash);
+      gl.uniform1f(uniforms.peakFlashProgress, peakFlashProgress);
       gl.uniform2f(uniforms.glowPosition, glowX, glowY);
       gl.uniform2f(uniforms.touchPosition, touchX, touchY);
       gl.uniform2f(uniforms.touchWind, touchWindX, touchWindY);
