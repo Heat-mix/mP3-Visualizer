@@ -51,6 +51,10 @@ uniform vec4 uAudio;
 uniform float uAttack;
 uniform float uGlow;
 uniform vec2 uGlowPos;
+uniform vec2 uTouchPos;
+uniform vec2 uTouchWind;
+uniform float uTouchStrength;
+uniform float uTouchGlow;
 uniform vec3 uDeep;
 uniform vec3 uMidColor;
 uniform vec3 uBright;
@@ -110,11 +114,72 @@ vec3 rainbowColor(float value){
 void main(){
   vec2 uv = (gl_FragCoord.xy - 0.5*uRes) / uRes.y;
   float t = uTime * 0.5;
+  vec2 touchUv = (uTouchPos * uRes - 0.5 * uRes) / uRes.y;
+  vec2 touchOffset = uv - touchUv;
 
-  float f = warpedFog(uv * 1.6, t);
+  vec2 touchWind = vec2(
+    uTouchWind.x * uRes.x / uRes.y,
+    uTouchWind.y
+  );
+
+  float touchSpeed = length(touchWind);
+
+  vec2 touchDir = touchSpeed > 0.0001
+    ? touchWind / touchSpeed
+    : vec2(1.0, 0.0);
+
+  vec2 touchSide = vec2(-touchDir.y, touchDir.x);
+
+  // 指から各pixelまでの位置を進行方向と横方向に分解する。
+  float along = dot(touchOffset, touchDir);
+  float across = dot(touchOffset, touchSide);
+
+  // 指の近くを通る、進行方向へ伸びた比較的強い風。
+  float coreField =
+    exp(-(across * across) / 0.0045) *
+    exp(-(along * along) / 0.018);
+
+  // 指が通過した後ろ側へ残る弱い流れ。
+  float behind = max(0.0, -along);
+
+  float trailField =
+    exp(-(across * across) / 0.012) *
+    exp(-(behind * behind) / 0.075) *
+    (1.0 - smoothstep(0.01, 0.08, along));
+
+  // さらに外側の霧を弱く巻き込む領域。
+  float outerField =
+    exp(-(across * across) / 0.030) *
+    exp(-(along * along) / 0.085);
+
+  float touchField =
+    coreField * 0.62 +
+    trailField * 0.28 +
+    outerField * 0.10;
+
+  touchField *= uTouchStrength;
+
+  vec2 mainFlow =
+    touchDir *
+    touchField *
+    0.13;
+
+  vec2 sideFlow =
+    touchSide *
+    across *
+    outerField *
+    uTouchStrength *
+    0.22;
+
+  vec2 fogUv =
+    uv -
+    mainFlow +
+    sideFlow;
+
+  float f = warpedFog(fogUv * 1.6, t);
   f = f * 0.5 + 0.5;
   float edge = smoothstep(0.28, 0.55, f) * (1.0 - smoothstep(0.68, 0.88, f));
-  float fine = noise(uv * 17.6 + vec2(t * 0.11, -t * 0.17));
+  float fine = noise(fogUv * 17.6 + vec2(t * 0.11, -t * 0.17));
   f += fine * edge * uAudio.z * 0.09;
   f += uAudio.w * 0.045;
 
@@ -142,6 +207,30 @@ void main(){
   float glowShape = 1.0 - smoothstep(0.03, 0.42, glowDistance);
   float fogInterior = smoothstep(0.25, 0.65, f);
   col = mix(col, vec3(1.0), glowShape * glowShape * fogInterior * uGlow * 0.55);
+
+  // 指の中心で、霧そのものが白く光る。
+  float touchCoreLight =
+    coreField *
+    (0.35 + fogInterior * 0.65);
+
+  // 指が通過した後方へ残る淡い白い霧。
+  float touchTrailLight =
+    trailField *
+    (0.25 + fogInterior * 0.75);
+
+  // 霧の濃淡を残した発光と航跡にする。
+  float touchLight =
+    (
+      touchCoreLight * 0.72 +
+      touchTrailLight * 0.38
+    ) *
+    uTouchGlow;
+
+  col = mix(
+    col,
+    vec3(1.0),
+    clamp(touchLight, 0.0, 0.62)
+  );
 
   gl_FragColor = vec4(col, 1.0);
 }
@@ -190,6 +279,10 @@ void main(){
       attack: gl.getUniformLocation(program, 'uAttack'),
       glow: gl.getUniformLocation(program, 'uGlow'),
       glowPosition: gl.getUniformLocation(program, 'uGlowPos'),
+      touchPosition: gl.getUniformLocation(program, 'uTouchPos'),
+      touchWind: gl.getUniformLocation(program, 'uTouchWind'),
+      touchStrength: gl.getUniformLocation(program, 'uTouchStrength'),
+      touchGlow: gl.getUniformLocation(program, 'uTouchGlow'),
       deep: gl.getUniformLocation(program, 'uDeep'),
       mid: gl.getUniformLocation(program, 'uMidColor'),
       bright: gl.getUniformLocation(program, 'uBright'),
@@ -210,11 +303,66 @@ void main(){
     let glowStrength = 0;
     let glowX = 0.5;
     let glowY = 0.5;
+    let touchX = 0.5;
+    let touchY = 0.5;
+    let touchTargetX = 0.5;
+    let touchTargetY = 0.5;
+    let touchWindX = 0;
+    let touchWindY = 0;
+    let touchTargetWindX = 0;
+    let touchTargetWindY = 0;
+    let touchStrength = 0;
+    let touchTargetStrength = 0;
+    let touchGlow = 0;
+    let touchTargetGlow = 0;
+    let touchActive = false;
+    let lastTouchInputTime = -Infinity;
+    let lastTouchFrameTime = 0;
 
     function resetAudio() {
       lowLevel = midLevel = highLevel = overallLevel = attackLevel = 0;
       previousLow = previousMid = previousHigh = 0;
       glowStartTime = -Infinity;
+    }
+
+    function setPointerInteraction(x, y, directionX, directionY, strength) {
+      touchTargetX = Math.max(0, Math.min(1, x));
+      touchTargetY = Math.max(0, Math.min(1, y));
+      touchTargetWindX = Math.max(-1, Math.min(1, directionX));
+      touchTargetWindY = Math.max(-1, Math.min(1, directionY));
+      touchTargetStrength = Math.max(0, Math.min(1, strength));
+      touchTargetGlow = Math.min(0.58, 0.18 + touchTargetStrength * 0.4);
+      touchActive = true;
+      lastTouchInputTime = performance.now();
+    }
+
+    function releasePointerInteraction() {
+      touchActive = false;
+      touchTargetWindX = 0;
+      touchTargetWindY = 0;
+      touchTargetStrength = 0;
+      touchTargetGlow = 0;
+    }
+
+    function updatePointerInteraction(timestamp) {
+      const elapsed = lastTouchFrameTime ? Math.min(0.05, Math.max(0, (timestamp - lastTouchFrameTime) / 1000)) : 1 / 45;
+      lastTouchFrameTime = timestamp;
+      if (touchActive && timestamp - lastTouchInputTime > 45) {
+        const idleDecay = Math.exp(-elapsed * 13);
+        touchTargetWindX *= idleDecay;
+        touchTargetWindY *= idleDecay;
+        touchTargetStrength *= idleDecay;
+      }
+      const positionAmount = 1 - Math.exp(-elapsed * 24);
+      const windAmount = 1 - Math.exp(-elapsed * (touchActive ? 22 : 8));
+      const strengthAmount = 1 - Math.exp(-elapsed * (touchTargetStrength > touchStrength ? 20 : 7));
+      const glowAmount = 1 - Math.exp(-elapsed * (touchTargetGlow > touchGlow ? 16 : 4.5));
+      touchX += (touchTargetX - touchX) * positionAmount;
+      touchY += (touchTargetY - touchY) * positionAmount;
+      touchWindX += (touchTargetWindX - touchWindX) * windAmount;
+      touchWindY += (touchTargetWindY - touchWindY) * windAmount;
+      touchStrength += (touchTargetStrength - touchStrength) * strengthAmount;
+      touchGlow += (touchTargetGlow - touchGlow) * glowAmount;
     }
 
     function setTheme(theme) {
@@ -300,6 +448,7 @@ void main(){
 
     function draw(timestamp, spectrum, sensitivity) {
       const level = updateAudio(spectrum, sensitivity, timestamp);
+      updatePointerInteraction(timestamp);
       const influence = sensitivityInfluence === null ? 0 : sensitivityInfluence;
       const glowAge = timestamp - glowStartTime;
       const glow = glowAge >= 0 && glowAge < 850
@@ -315,6 +464,10 @@ void main(){
       gl.uniform1f(uniforms.attack, attackLevel);
       gl.uniform1f(uniforms.glow, glow);
       gl.uniform2f(uniforms.glowPosition, glowX, glowY);
+      gl.uniform2f(uniforms.touchPosition, touchX, touchY);
+      gl.uniform2f(uniforms.touchWind, touchWindX, touchWindY);
+      gl.uniform1f(uniforms.touchStrength, touchStrength);
+      gl.uniform1f(uniforms.touchGlow, touchGlow);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       return level;
     }
@@ -333,7 +486,15 @@ void main(){
     }
 
     setTheme('neon');
-    return { resize, setTheme, draw, clear, dispose };
+    return {
+      resize,
+      setTheme,
+      setPointerInteraction,
+      releasePointerInteraction,
+      draw,
+      clear,
+      dispose,
+    };
   }
 
   window.createMistRenderer = createMistRenderer;

@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
   version: '0.4.3',
-  lastUpdated: '2026年9月20日 17:07',
+  lastUpdated: '2026年9月21日 13:08',
 });
 
 const audio = document.querySelector('#audio');
@@ -188,6 +188,10 @@ let starryRandomState = 0x6d2b79f5;
 let mistRenderer = null;
 let mistTheme = 'neon';
 let mistContextLost = false;
+let mistPointerId = null;
+let mistPointerX = 0.5;
+let mistPointerY = 0.5;
+let mistPointerTime = 0;
 let isRainbowTheme = false;
 
 const TARGET_RENDER_FPS = 45;
@@ -558,6 +562,29 @@ function ensureMistRenderer() {
     console.error(error);
     showMessage('MISTを表示できません。このブラウザのWebGL設定をご確認ください。');
     return false;
+  }
+}
+
+function getMistPointerPosition(event) {
+  const rect = mistCanvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  return {
+    x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
+    y: Math.max(0, Math.min(1, 1 - (event.clientY - rect.top) / rect.height)),
+  };
+}
+
+function releaseMistPointer() {
+  const pointerId = mistPointerId;
+  mistPointerId = null;
+  mistPointerTime = 0;
+  if (mistRenderer && !mistContextLost) mistRenderer.releasePointerInteraction();
+  if (pointerId !== null && mistCanvas.hasPointerCapture?.(pointerId)) {
+    try {
+      mistCanvas.releasePointerCapture(pointerId);
+    } catch (error) {
+      console.debug('MIST pointer capture release:', error);
+    }
   }
 }
 
@@ -2335,6 +2362,7 @@ document.querySelectorAll('.visual-mode').forEach((button) => button.addEventLis
     sparkLastTimestamp = 0;
   }
   const showMist = visualMode === 'mist';
+  if (wasMist && !showMist) releaseMistPointer();
   canvas.hidden = showMist;
   mistCanvas.hidden = !showMist;
   visualStage.classList.toggle('is-mist', showMist);
@@ -2379,8 +2407,58 @@ document.querySelector('#fullscreenButton').addEventListener('click', async () =
   }
 });
 
+mistCanvas.addEventListener('pointerdown', (event) => {
+  if (visualMode !== 'mist' || mistContextLost || !mistRenderer || mistPointerId !== null) return;
+  if (event.pointerType === 'mouse' && event.button !== 0) return;
+  const position = getMistPointerPosition(event);
+  if (!position) return;
+  mistPointerId = event.pointerId;
+  mistPointerX = position.x;
+  mistPointerY = position.y;
+  mistPointerTime = event.timeStamp;
+  try {
+    mistCanvas.setPointerCapture?.(event.pointerId);
+  } catch (error) {
+    console.debug('MIST pointer capture:', error);
+  }
+  mistRenderer.setPointerInteraction(position.x, position.y, 0, 0, 0);
+  startRendering();
+  event.preventDefault();
+});
+
+mistCanvas.addEventListener('pointermove', (event) => {
+  if (event.pointerId !== mistPointerId || !mistRenderer || mistContextLost) return;
+  const position = getMistPointerPosition(event);
+  if (!position) return;
+  const elapsed = Math.max(8, event.timeStamp - mistPointerTime) / 1000;
+  const deltaX = position.x - mistPointerX;
+  const deltaY = position.y - mistPointerY;
+  const distance = Math.hypot(deltaX, deltaY);
+  const directionX = distance ? deltaX / distance : 0;
+  const directionY = distance ? deltaY / distance : 0;
+  const strength = Math.min(1, distance / elapsed / 1.35);
+  mistPointerX = position.x;
+  mistPointerY = position.y;
+  mistPointerTime = event.timeStamp;
+  mistRenderer.setPointerInteraction(position.x, position.y, directionX, directionY, strength);
+  event.preventDefault();
+});
+
+mistCanvas.addEventListener('pointerup', (event) => {
+  if (event.pointerId !== mistPointerId) return;
+  releaseMistPointer();
+  event.preventDefault();
+});
+mistCanvas.addEventListener('pointercancel', (event) => {
+  if (event.pointerId === mistPointerId) releaseMistPointer();
+});
+mistCanvas.addEventListener('lostpointercapture', (event) => {
+  if (event.pointerId === mistPointerId) releaseMistPointer();
+});
+
 mistCanvas.addEventListener('webglcontextlost', (event) => {
   event.preventDefault();
+  releaseMistPointer();
   mistContextLost = true;
   mistRenderer = null;
   if (visualMode === 'mist') stopRendering();
