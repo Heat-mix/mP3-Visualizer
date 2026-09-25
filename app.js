@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
   version: '0.4.3',
-  lastUpdated: '2026年9月25日 17:07',
+  lastUpdated: '2026年9月25日 20:21',
 });
 
 const audio = document.querySelector('#audio');
@@ -123,6 +123,7 @@ let auroraBaseCosines = null;
 let auroraGeometryWidth = 0;
 let auroraTimeDataLength = 0;
 let sparkParticles = [];
+let sparkDustParticles = [];
 let previousSparkLevel = 0;
 let sparkLastTimestamp = 0;
 let sparkLastBurst = -Infinity;
@@ -217,6 +218,7 @@ const ORBIT_RAINBOW_PHASE_INDICES = new Uint16Array(ORBIT_SPEED_MULTIPLIERS.leng
 const AURORA_LAYERS = 4;
 const AURORA_SAMPLES = 72;
 const MAX_SPARK_PARTICLES = 360;
+const MAX_SPARK_DUST_PARTICLES = 240;
 const STARRY_STAR_COUNT = 144;
 const STARRY_FAR_COUNT = 84;
 const STARRY_MID_COUNT = 42;
@@ -427,6 +429,7 @@ function loadPlaylistTrack(index) {
   const track = playlist[index];
   if (!track) return false;
   sparkParticles = [];
+  sparkDustParticles = [];
   previousSparkLevel = 0;
   sparkLastTimestamp = 0;
   sparkLastBurst = -Infinity;
@@ -1052,6 +1055,44 @@ function drawAurora(width, height, accent, accent2, timestamp) {
   return averageLevel(frequencyData, 64);
 }
 
+function createSparkDust(originRadius, minimumSize) {
+  const dustCount = 50 + Math.floor(Math.random() * 31);
+  for (let i = 0; i < dustCount; i += 1) {
+    const angle = Math.random() * Math.PI * 2 + (Math.random() - 0.5) * 0.08;
+    const life = 0.22 + Math.random() * 0.24;
+    const sizeRoll = Math.random();
+    let size;
+    if (sizeRoll < 0.80) {
+      size = 0.35 + Math.random() * 0.55;
+    } else if (sizeRoll < 0.97) {
+      size = 0.90 + Math.random() * 0.80;
+    } else {
+      size = 1.70 + Math.random() * 1.20;
+    }
+    sparkDustParticles.push({
+      angle,
+      directionX: Math.cos(angle),
+      directionY: Math.sin(angle),
+      rainbowColorIndex: Math.floor(
+        (((angle / (Math.PI * 2)) + 0.25) % 1) * RAINBOW_COLOR_STEPS,
+      ),
+      radius: originRadius * (0.90 + Math.random() * 0.18),
+      speed: minimumSize * (0.34 + Math.random() * 0.42),
+      life,
+      maxLife: life,
+      size,
+      opacity: 0.28 + Math.random() * 0.42,
+      alternate: Math.random() > 0.5,
+    });
+  }
+  if (sparkDustParticles.length > MAX_SPARK_DUST_PARTICLES) {
+    sparkDustParticles.splice(
+      0,
+      sparkDustParticles.length - MAX_SPARK_DUST_PARTICLES,
+    );
+  }
+}
+
 function drawSpark(width, height, accent, accent2, timestamp) {
   const samples = 64;
   const centerX = width / 2;
@@ -1155,6 +1196,7 @@ function drawSpark(width, height, accent, accent2, timestamp) {
       sparkLastLargeBurst = timestamp;
       const flashStrength = Math.min(1, 0.65 + Math.min(0.35, burstEnergy * 0.05));
       sparkFlash = Math.max(sparkFlash, flashStrength);
+      createSparkDust(originRadius, minimumSize);
     }
   }
 
@@ -1281,6 +1323,37 @@ function drawSpark(width, height, accent, accent2, timestamp) {
       writeIndex += 1;
     }
   }
+  let dustWriteIndex = 0;
+  for (let readIndex = 0; readIndex < sparkDustParticles.length; readIndex += 1) {
+    const dust = sparkDustParticles[readIndex];
+    dust.life -= delta;
+    dust.radius += dust.speed * delta;
+    const dustAlpha = Math.max(0, dust.life / dust.maxLife);
+    const x = centerX + dust.directionX * dust.radius;
+    const y = centerY + dust.directionY * dust.radius;
+    const currentDustAlpha = Math.pow(dustAlpha, 1.6) * dust.opacity;
+    const dustContext = isRainbowTheme
+      ? sparkAccentBufferContext
+      : (dust.alternate ? sparkAccentBufferContext : sparkAccent2BufferContext);
+    if (isRainbowTheme) {
+      const color = RAINBOW_CYCLIC_COLORS[dust.rainbowColorIndex];
+      dustContext.fillStyle = color;
+      hasAccentParticles = true;
+    } else if (dust.alternate) {
+      hasAccentParticles = true;
+    } else {
+      hasAccent2Particles = true;
+    }
+    dustContext.globalAlpha = currentDustAlpha;
+    dustContext.beginPath();
+    dustContext.arc(x, y, dust.size, 0, Math.PI * 2);
+    dustContext.fill();
+    if (dust.life > 0) {
+      sparkDustParticles[dustWriteIndex] = dust;
+      dustWriteIndex += 1;
+    }
+  }
+  sparkDustParticles.length = dustWriteIndex;
   sparkAccentBufferContext.restore();
   sparkAccent2BufferContext.restore();
   sparkParticles.length = writeIndex;
@@ -2282,6 +2355,7 @@ async function safeExit() {
   if (Number.isFinite(audio.duration)) audio.currentTime = 0;
   progress.value = 0;
   sparkParticles = [];
+  sparkDustParticles = [];
   previousSparkLevel = 0;
   sparkLastTimestamp = 0;
   sparkLastBurst = -Infinity;
@@ -2539,6 +2613,7 @@ document.querySelectorAll('.visual-mode').forEach((button) => button.addEventLis
   visualMode = button.dataset.visual;
   if (visualMode === 'spark') {
     sparkParticles = [];
+    sparkDustParticles = [];
     previousSparkLevel = 0;
     sparkLastTimestamp = 0;
     sparkLastBurst = -Infinity;
