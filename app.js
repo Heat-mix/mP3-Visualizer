@@ -1,7 +1,7 @@
 // 公開時はこの2項目だけ更新します。
 const APP_META = Object.freeze({
   version: '0.4.3',
-  lastUpdated: '2026年9月21日 16:25',
+  lastUpdated: '2026年9月25日 16:16',
 });
 
 const audio = document.querySelector('#audio');
@@ -125,7 +125,10 @@ let auroraTimeDataLength = 0;
 let sparkParticles = [];
 let previousSparkLevel = 0;
 let sparkLastTimestamp = 0;
-let sparkLastBurst = 0;
+let sparkLastBurst = -Infinity;
+let sparkLastLargeBurst = -Infinity;
+let sparkLastSustain = -Infinity;
+let sparkFlash = 0;
 let starryX = null;
 let starryY = null;
 let starryDepth = null;
@@ -213,6 +216,7 @@ const ORBIT_PHASE_COSINES = new Float64Array(ORBIT_SPEED_MULTIPLIERS.length);
 const ORBIT_RAINBOW_PHASE_INDICES = new Uint16Array(ORBIT_SPEED_MULTIPLIERS.length);
 const AURORA_LAYERS = 4;
 const AURORA_SAMPLES = 72;
+const MAX_SPARK_PARTICLES = 360;
 const STARRY_STAR_COUNT = 144;
 const STARRY_FAR_COUNT = 84;
 const STARRY_MID_COUNT = 42;
@@ -422,6 +426,13 @@ function updateTrackReadout(resetTime = false) {
 function loadPlaylistTrack(index) {
   const track = playlist[index];
   if (!track) return false;
+  sparkParticles = [];
+  previousSparkLevel = 0;
+  sparkLastTimestamp = 0;
+  sparkLastBurst = -Infinity;
+  sparkLastLargeBurst = -Infinity;
+  sparkLastSustain = -Infinity;
+  sparkFlash = 0;
   currentTrackIndex = index;
   audio.src = track.url;
   audio.load();
@@ -1048,34 +1059,135 @@ function drawSpark(width, height, accent, accent2, timestamp) {
   const minimumSize = Math.min(width, height);
   const originRadius = minimumSize * 0.22;
   const level = averageLevel(frequencyData, samples) / 100;
-  const reactiveLevel = Math.min(1, level * sensitivityAmount);
-  const rise = reactiveLevel - previousSparkLevel;
+  const rise = Math.max(0, level - previousSparkLevel);
+  const sensitivityNormalized = Math.max(
+    0,
+    Math.min(1, (sensitivityAmount - 0.5) / 1.9),
+  );
+  const sustainLevelThreshold = 0.045;
+  const sustainInterval = 280 - sensitivityNormalized * 150;
+  const sustainStrength = Math.max(
+    0,
+    Math.min(1, (level - sustainLevelThreshold) / 0.20),
+  );
+  const sustainActive = level > sustainLevelThreshold
+    && timestamp - sparkLastSustain >= sustainInterval;
+  const triggerThreshold = 0.034 - sensitivityNormalized * 0.020;
+  const eventStrength = triggerThreshold > 0 ? rise / triggerThreshold : 0;
+  const burstEnergy = eventStrength * (0.82 + level * 0.36);
+  let burstType = null;
+  if (burstEnergy >= 3.2) {
+    burstType = 'large';
+  } else if (burstEnergy >= 1.8) {
+    burstType = 'medium';
+  } else if (burstEnergy >= 1.0) {
+    burstType = 'small';
+  }
   const delta = sparkLastTimestamp ? Math.min((timestamp - sparkLastTimestamp) / 1000, 0.05) : 0.016;
-  const canBurst = timestamp - sparkLastBurst > 55;
+  const canBurst = timestamp - sparkLastBurst > 70;
+  const canLargeBurst = timestamp - sparkLastLargeBurst > 260;
 
-  if (canBurst && reactiveLevel > 0.22 && (rise > 0.025 || reactiveLevel > 0.68)) {
-    const burstSize = Math.round(3 + reactiveLevel * 8);
+  if (canBurst && burstType && (burstType !== 'large' || canLargeBurst)) {
+    let burstSize;
+    let lifeMinimum;
+    let lifeRange;
+    let speedMinimum;
+    let speedRange;
+    let widthMinimum;
+    let widthRange;
+    let lengthMinimum;
+    let lengthRange;
+    if (burstType === 'large') {
+      burstSize = 36 + Math.floor(Math.random() * 25);
+      lifeMinimum = 0.65;
+      lifeRange = 0.30;
+      speedMinimum = 0.62;
+      speedRange = 0.30;
+      widthMinimum = 1.4;
+      widthRange = 1.2;
+      lengthMinimum = 22;
+      lengthRange = 23;
+    } else if (burstType === 'medium') {
+      burstSize = 16 + Math.floor(Math.random() * 13);
+      lifeMinimum = 0.40;
+      lifeRange = 0.25;
+      speedMinimum = 0.48;
+      speedRange = 0.26;
+      widthMinimum = 1.1;
+      widthRange = 0.9;
+      lengthMinimum = 10;
+      lengthRange = 12;
+    } else {
+      burstSize = 6 + Math.floor(Math.random() * 7);
+      lifeMinimum = 0.20;
+      lifeRange = 0.12;
+      speedMinimum = 0.34;
+      speedRange = 0.18;
+      widthMinimum = 0.9;
+      widthRange = 0.6;
+      lengthMinimum = 5;
+      lengthRange = 5;
+    }
+    const densityScale = 0.75 + sensitivityNormalized * 0.50;
+    burstSize = Math.max(1, Math.round(burstSize * densityScale));
     for (let i = 0; i < burstSize; i += 1) {
       const angle = Math.random() * Math.PI * 2;
-      const life = 0.28 + Math.random() * 0.34;
+      const life = lifeMinimum + Math.random() * lifeRange;
       sparkParticles.push({
         angle,
         directionX: Math.cos(angle),
         directionY: Math.sin(angle),
         rainbowColorIndex: Math.floor((((angle / (Math.PI * 2)) + 0.25) % 1) * RAINBOW_COLOR_STEPS),
         radius: originRadius * (0.82 + Math.random() * 0.18),
-        speed: minimumSize * (0.24 + Math.random() * 0.34) * (0.75 + reactiveLevel),
+        speed: minimumSize * (speedMinimum + Math.random() * speedRange),
         life,
         maxLife: life,
-        width: 1.2 + Math.random() * 2.3,
-        length: 3 + Math.random() * 9,
+        width: widthMinimum + Math.random() * widthRange,
+        length: lengthMinimum + Math.random() * lengthRange,
         alternate: Math.random() > 0.48,
+        opacity: 1,
+        endBloomScale: 1.8 + Math.random() * 2.0,
+        twinkle: Math.random() < 0.25,
       });
     }
     sparkLastBurst = timestamp;
+    if (burstType === 'large') {
+      sparkLastLargeBurst = timestamp;
+      const flashStrength = Math.min(1, 0.65 + Math.min(0.35, burstEnergy * 0.05));
+      sparkFlash = Math.max(sparkFlash, flashStrength);
+    }
   }
 
-  previousSparkLevel += (reactiveLevel - previousSparkLevel) * 0.42;
+  if (sustainActive) {
+    const sustainCount = 5 + Math.round(sensitivityNormalized * 5);
+    for (let i = 0; i < sustainCount; i += 1) {
+      const angle = Math.random() * Math.PI * 2;
+      const life = 0.30 + Math.random() * 0.22;
+      sparkParticles.push({
+        angle,
+        directionX: Math.cos(angle),
+        directionY: Math.sin(angle),
+        rainbowColorIndex: Math.floor((((angle / (Math.PI * 2)) + 0.25) % 1) * RAINBOW_COLOR_STEPS),
+        radius: originRadius * (0.82 + Math.random() * 0.18),
+        speed: minimumSize * (0.38 + Math.random() * 0.22),
+        life,
+        maxLife: life,
+        width: 0.9 + Math.random() * 0.7,
+        length: 8 + Math.random() * 10,
+        alternate: Math.random() > 0.48,
+        opacity: 0.68 + sustainStrength * 0.17,
+        endBloomScale: 1.8 + Math.random() * 2.0,
+        twinkle: Math.random() < 0.25,
+      });
+    }
+    sparkLastSustain = timestamp;
+  }
+
+  if (sparkParticles.length > MAX_SPARK_PARTICLES) {
+    sparkParticles.splice(0, sparkParticles.length - MAX_SPARK_PARTICLES);
+  }
+
+  previousSparkLevel += (level - previousSparkLevel) * 0.35;
   sparkLastTimestamp = timestamp;
   sparkAccentBufferContext.clearRect(0, 0, width, height);
   sparkAccent2BufferContext.clearRect(0, 0, width, height);
@@ -1100,6 +1212,15 @@ function drawSpark(width, height, accent, accent2, timestamp) {
     particle.life -= delta;
     particle.radius += particle.speed * delta;
     const alpha = Math.max(0, particle.life / particle.maxLife);
+    const ageProgress = Math.max(0, Math.min(1, 1 - particle.life / particle.maxLife));
+    const endBloomProgress = Math.max(0, Math.min(1, (ageProgress - 0.65) / 0.35));
+    const endBloom = endBloomProgress * endBloomProgress;
+    const twinkleProgress = particle.twinkle && ageProgress > 0.86
+      ? Math.min(1, (ageProgress - 0.86) / 0.14)
+      : 0;
+    const twinkleAmount = twinkleProgress > 0
+      ? Math.sin(twinkleProgress * Math.PI)
+      : 0;
     const particleContext = isRainbowTheme
       ? sparkAccentBufferContext
       : (particle.alternate ? sparkAccentBufferContext : sparkAccent2BufferContext);
@@ -1121,15 +1242,40 @@ function drawSpark(width, height, accent, accent2, timestamp) {
     const tailRadius = Math.max(originRadius, particle.radius - particle.length);
     const tailX = centerX + particle.directionX * tailRadius;
     const tailY = centerY + particle.directionY * tailRadius;
-    particleContext.globalAlpha = alpha * alpha * 0.95;
+    const currentParticleAlpha = Math.pow(alpha, 1.35) * 0.95 * (particle.opacity ?? 1);
+    particleContext.globalAlpha = currentParticleAlpha;
     particleContext.lineWidth = particle.width;
     particleContext.beginPath();
     particleContext.moveTo(tailX, tailY);
     particleContext.lineTo(x, y);
     particleContext.stroke();
+    const headRadius = particle.width * (1.1 + endBloom * particle.endBloomScale);
+    if (endBloom > 0) {
+      const bloomRadius = headRadius * (1.0 + endBloom * 1.2);
+      const bloomAlpha = endBloom * 0.25;
+      particleContext.globalAlpha = currentParticleAlpha * bloomAlpha;
+      particleContext.beginPath();
+      particleContext.arc(x, y, bloomRadius, 0, Math.PI * 2);
+      particleContext.fill();
+    }
+    particleContext.globalAlpha = currentParticleAlpha;
     particleContext.beginPath();
-    particleContext.arc(x, y, particle.width * 0.65, 0, Math.PI * 2);
+    particleContext.arc(x, y, headRadius, 0, Math.PI * 2);
     particleContext.fill();
+    if (twinkleAmount > 0) {
+      const twinkleSize = particle.width * (2.0 + twinkleAmount * 3.0);
+      particleContext.globalAlpha = Math.min(
+        1,
+        currentParticleAlpha * (0.55 + twinkleAmount * 0.75),
+      );
+      particleContext.lineWidth = Math.max(0.6, particle.width * 0.45);
+      particleContext.beginPath();
+      particleContext.moveTo(x - twinkleSize, y);
+      particleContext.lineTo(x + twinkleSize, y);
+      particleContext.moveTo(x, y - twinkleSize);
+      particleContext.lineTo(x, y + twinkleSize);
+      particleContext.stroke();
+    }
     if (particle.life > 0 && particle.radius < maximumRadius) {
       sparkParticles[writeIndex] = particle;
       writeIndex += 1;
@@ -1138,6 +1284,35 @@ function drawSpark(width, height, accent, accent2, timestamp) {
   sparkAccentBufferContext.restore();
   sparkAccent2BufferContext.restore();
   sparkParticles.length = writeIndex;
+
+  if (sparkFlash > 0) {
+    const flashChannels = starryColorChannels(accent);
+    const flashAlpha = sparkFlash * 0.12;
+    const flashGradient = ctx.createRadialGradient(
+      centerX,
+      centerY,
+      0,
+      centerX,
+      centerY,
+      minimumSize * 0.85,
+    );
+    flashGradient.addColorStop(
+      0,
+      `rgba(${flashChannels[0]}, ${flashChannels[1]}, ${flashChannels[2]}, ${flashAlpha})`,
+    );
+    flashGradient.addColorStop(
+      0.45,
+      `rgba(${flashChannels[0]}, ${flashChannels[1]}, ${flashChannels[2]}, ${flashAlpha * 0.45})`,
+    );
+    flashGradient.addColorStop(
+      1,
+      `rgba(${flashChannels[0]}, ${flashChannels[1]}, ${flashChannels[2]}, 0)`,
+    );
+    ctx.save();
+    ctx.fillStyle = flashGradient;
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+  }
 
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
@@ -1152,6 +1327,8 @@ function drawSpark(width, height, accent, accent2, timestamp) {
     ctx.drawImage(sparkAccent2Buffer, 0, 0, width, height);
   }
   ctx.restore();
+  sparkFlash *= Math.pow(0.04, delta);
+  if (sparkFlash < 0.001) sparkFlash = 0;
   return Math.round(level * 100);
 }
 
@@ -2107,6 +2284,10 @@ async function safeExit() {
   sparkParticles = [];
   previousSparkLevel = 0;
   sparkLastTimestamp = 0;
+  sparkLastBurst = -Infinity;
+  sparkLastLargeBurst = -Infinity;
+  sparkLastSustain = -Infinity;
+  sparkFlash = 0;
   await suspendAudioGraph();
   disconnectAudioGraph();
   stopRendering(true);
@@ -2360,6 +2541,10 @@ document.querySelectorAll('.visual-mode').forEach((button) => button.addEventLis
     sparkParticles = [];
     previousSparkLevel = 0;
     sparkLastTimestamp = 0;
+    sparkLastBurst = -Infinity;
+    sparkLastLargeBurst = -Infinity;
+    sparkLastSustain = -Infinity;
+    sparkFlash = 0;
   }
   const showMist = visualMode === 'mist';
   if (wasMist && !showMist) releaseMistPointer();
